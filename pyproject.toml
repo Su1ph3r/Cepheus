@@ -47,17 +47,18 @@ classifiers = [
     "Environment :: Console",
 ]
 
-[project.urls]
-Homepage = "https://github.com/su1ph3r/Cepheus"
-Repository = "https://github.com/su1ph3r/Cepheus"
-Issues = "https://github.com/su1ph3r/Cepheus/issues"
-Documentation = "https://github.com/su1ph3r/Cepheus/blob/main/docs/ARCHITECTURE.md"
 dependencies = [
     "pydantic>=2.0,<3.0",
     "pydantic-settings>=2.0,<3.0",
     "typer>=0.12,<1.0",
     "rich>=13.0,<14.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/su1ph3r/Cepheus"
+Repository = "https://github.com/su1ph3r/Cepheus"
+Issues = "https://github.com/su1ph3r/Cepheus/issues"
+Documentation = "https://github.com/su1ph3r/Cepheus/blob/main/docs/ARCHITECTURE.md"
 
 [project.optional-dependencies]
 llm = [
