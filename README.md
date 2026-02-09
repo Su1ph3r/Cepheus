@@ -12,7 +12,7 @@
 
 Cepheus is a two-component container security tool that answers one question: **"Can an attacker escape this container, and how?"**
 
-1. **Enumerator** — a zero-dependency POSIX shell script that runs inside any container and dumps its full security posture to JSON (capabilities, mounts, kernel version, seccomp, AppArmor, namespaces, cgroups, credentials, network config, writable paths, and available tools).
+1. **Enumerator** — a zero-dependency POSIX shell script that runs inside any container and dumps its full security posture to JSON (capabilities, mounts, kernel version, seccomp, AppArmor, namespaces, cgroups, credentials, network config, Kubernetes metadata, runtime versions, writable paths, and available tools).
 
 2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **56 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance.
 
@@ -25,7 +25,7 @@ Named after the constellation Cepheus — the king who watches over the heavens 
 | Capability enumeration | Partial | Yes | Yes | Partial | **Full** |
 | Kernel CVE correlation | - | - | - | - | **12 CVEs** |
 | Runtime version detection | - | Partial | - | - | **Yes** |
-| Combinatorial chain analysis | - | - | - | - | **9+ combos** |
+| Combinatorial chain analysis | - | - | - | - | **21 combos** |
 | Escape path scoring | - | - | - | - | **Weighted** |
 | PoC generation | - | Some | - | Some | **All 56** |
 | Defense enumeration | - | - | Partial | - | **Full** |
@@ -138,7 +138,7 @@ Docker socket mounts, containerd and CRI-O socket mounts, `/proc/sys/kernel/core
 Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, kubelet node proxy, AppArmor unconfined profile detection, and SELinux disabled/unconfined detection.
 
 ### Combinatorial (6)
-Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`, LSM unconfined + capability escalation, and shared memory + ptrace injection.
+Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`. The chainer also builds dynamic two-step chains like LSM unconfined + capability escalation and shared memory + ptrace injection.
 
 ### Information Disclosure (4)
 Environment variable secret leaks, cloud instance credential theft via metadata service, Kubernetes configmap/secret volume mounts, and Docker environment inspection via API.
@@ -162,7 +162,7 @@ Chains are ranked highest-score-first. Missing posture data uses a configurable 
 
 ## Enumerator
 
-The enumerator is a **582-line POSIX shell script** with zero external dependencies. It runs anywhere:
+The enumerator is a **784-line POSIX shell script** with zero external dependencies. It runs anywhere:
 
 | Environment | Shell | Status |
 |---|---|---|
@@ -213,18 +213,18 @@ export CEPHEUS_LLM_MAX_TOKENS=4096
 
 ```
 Enumerator (POSIX sh)          Analysis Engine (Python)
-┌──────────────┐               ┌──────────────────────┐
-│ cepheus-enum │──── JSON ────→│ Matcher              │
-│   .sh        │               │   ↓                  │
-└──────────────┘               │ Chainer              │
-                               │   ↓                  │
-                               │ Scorer               │
-                               │   ↓                  │
-                               │ Output (terminal/JSON/│
-│        HTML/MITRE)     │
-                               │   ↓ (optional)       │
-                               │ LLM Enrichment       │
-                               └──────────────────────┘
+┌──────────────┐               ┌────────────────────────────┐
+│ cepheus-enum │──── JSON ────→│ Matcher                    │
+│   .sh        │               │   ↓                        │
+└──────────────┘               │ Chainer                    │
+                               │   ↓                        │
+                               │ Scorer                     │
+                               │   ↓                        │
+                               │ Output (terminal/JSON/     │
+                               │         HTML/MITRE)        │
+                               │   ↓ (optional)             │
+                               │ LLM Enrichment             │
+                               └────────────────────────────┘
 ```
 
 For full architecture details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -27,7 +27,10 @@ Cepheus is a two-component container escape modeling tool:
 │  │ • Writable paths          │  │     │  │ ┌──────────┐  ┌────────────┐  │  │
 │  │ • Available tools         │  │     │  │ │ Terminal │  │ JSON Report│  │  │
 │  │ • Runtime detection       │  │     │  │ │ Output   │  │ Output     │  │  │
-│  │ • Credentials             │  │     │  │ └──────────┘  └────────────┘  │  │
+│  │ • Credentials             │  │     │  │ ├──────────┤  ├────────────┤  │  │
+│  │ • Kubernetes metadata     │  │     │  │ │ HTML     │  │ MITRE ATT&K│  │  │
+│  │ • Runtime versions        │  │     │  │ │ Report   │  │ Navigator  │  │  │
+│  │                           │  │     │  │ └──────────┘  └────────────┘  │  │
 │  └───────────────────────────┘  │     │  │       ↓ (optional)           │  │
 │                                 │     │  │ ┌──────────────────────────┐  │  │
 │                                 │     │  │ │ LLM Enrichment          │  │  │
