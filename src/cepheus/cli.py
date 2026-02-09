@@ -78,14 +78,37 @@ def analyze(
     min_severity: SeverityFilter = typer.Option(SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"),
     llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
+    from_nubicustos: Path | None = typer.Option(None, "--from-nubicustos", help="Nubicustos container export for cloud context enrichment"),
 ) -> None:
     """Analyze a container posture JSON file and identify escape paths."""
     posture = _load_posture(posture_file)
     config = CepheusConfig()
 
+    # Cloud context enrichment from Nubicustos
+    cloud_context = None
+    if from_nubicustos:
+        if not from_nubicustos.exists():
+            console.print(f"[red]Error: Nubicustos file not found: {from_nubicustos}[/red]")
+            raise typer.Exit(1)
+        try:
+            from cepheus.importers.nubicustos import build_cloud_context, load_nubicustos_containers
+
+            containers = load_nubicustos_containers(from_nubicustos)
+            cloud_context = build_cloud_context(containers)
+            console.print(f"[green]Loaded {len(containers)} containers from Nubicustos[/green]")
+        except json.JSONDecodeError as e:
+            console.print(f"[red]Error: Invalid JSON in Nubicustos file: {e}[/red]")
+            raise typer.Exit(1)
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+
     from cepheus.engine.analyzer import analyze as run_analysis
 
     result = run_analysis(posture, config)
+
+    if cloud_context:
+        result.cloud_context = cloud_context
 
     # LLM enrichment
     if llm:

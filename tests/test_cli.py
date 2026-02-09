@@ -175,6 +175,84 @@ def test_diff_json_format(tmp_path):
     assert result.exit_code == 0
 
 
+def test_analyze_with_nubicustos(sample_posture_file, tmp_path):
+    nubicustos_data = {
+        "export_source": "nubicustos",
+        "export_timestamp": "2025-01-15T10:30:00Z",
+        "total_containers": 1,
+        "containers": [
+            {
+                "resource_id": "arn:aws:ecs:us-east-1:123456789:task/abc",
+                "resource_name": "web-app",
+                "resource_type": "ecs-container",
+                "cloud_provider": "aws",
+                "region": "us-east-1",
+                "container_image": "nginx:latest",
+                "privileged": False,
+            },
+        ],
+    }
+    nubicustos_file = tmp_path / "nubicustos.json"
+    nubicustos_file.write_text(json.dumps(nubicustos_data))
+
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--from-nubicustos", str(nubicustos_file)])
+    assert result.exit_code == 0
+    assert "Loaded 1 containers from Nubicustos" in result.output
+
+
+def test_analyze_with_nubicustos_json_output(sample_posture_file, tmp_path):
+    nubicustos_data = {
+        "export_source": "nubicustos",
+        "export_timestamp": "2025-01-15T10:30:00Z",
+        "total_containers": 1,
+        "containers": [
+            {
+                "resource_id": "arn:aws:ecs:us-east-1:123456789:task/abc",
+                "resource_name": "web-app",
+                "cloud_provider": "aws",
+                "region": "us-east-1",
+                "container_image": "nginx:latest",
+                "privileged": False,
+            },
+        ],
+    }
+    nubicustos_file = tmp_path / "nubicustos.json"
+    nubicustos_file.write_text(json.dumps(nubicustos_data))
+    output_path = tmp_path / "report.json"
+
+    result = runner.invoke(app, [
+        "analyze", str(sample_posture_file),
+        "--from-nubicustos", str(nubicustos_file),
+        "--output", str(output_path),
+    ])
+    assert result.exit_code == 0
+    report = json.loads(output_path.read_text())
+    assert report["cloud_context"]["source"] == "nubicustos"
+    assert report["cloud_context"]["total_containers"] == 1
+
+
+def test_analyze_nubicustos_file_not_found(sample_posture_file):
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--from-nubicustos", "/nonexistent/nubicustos.json"])
+    assert result.exit_code == 1
+
+
+def test_analyze_nubicustos_invalid_source(sample_posture_file, tmp_path):
+    bad_data = {"export_source": "wrong", "containers": []}
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_text(json.dumps(bad_data))
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--from-nubicustos", str(bad_file)])
+    assert result.exit_code == 1
+    assert "Expected export_source" in result.output
+
+
+def test_analyze_nubicustos_invalid_json(sample_posture_file, tmp_path):
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_text("not json")
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--from-nubicustos", str(bad_file)])
+    assert result.exit_code == 1
+    assert "Invalid JSON" in result.output
+
+
 def test_no_args_shows_help():
     result = runner.invoke(app, [])
     # Typer no_args_is_help exits with code 0 or 2 depending on version
