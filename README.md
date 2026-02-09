@@ -266,6 +266,41 @@ pytest --cov=cepheus --cov-report=term     # with coverage
 
 Cepheus is a **defensive security tool** for authorized assessments. Do not use it against systems you do not own or have explicit written permission to test. See [SECURITY.md](SECURITY.md) for the full security policy.
 
+## Cross-Tool Integration
+
+Cepheus participates in a cross-tool security pipeline:
+
+```
+Nubicustos (cloud) ──containers──> Cepheus (container escape)
+Reticustos (network) ──endpoints──> Indago (API fuzzing)
+Indago (API fuzzing) ──WAF-blocked──> BypassBurrito (WAF bypass)
+Ariadne (attack paths) ──endpoints──> Indago (API fuzzing)
+All tools ──findings──> Vinculum (correlation) ──export──> Ariadne (attack paths)
+```
+
+### Importing from Nubicustos
+
+Enrich container escape analysis with cloud context from Nubicustos:
+
+```bash
+# Export containers from Nubicustos
+curl -o containers.json "http://localhost:8000/api/exports/containers"
+
+# Analyze with cloud context
+cepheus analyze posture.json --from-nubicustos containers.json
+```
+
+### Exporting to Vinculum
+
+Export analysis results for correlation in Vinculum:
+
+```bash
+cepheus analyze posture.json --format json -o escape_report.json
+vinculum ingest escape_report.json --format ariadne --output correlated.json
+```
+
+See also: [Vinculum](https://github.com/Su1ph3r/vinculum) | [Nubicustos](https://github.com/Su1ph3r/Nubicustos) | [Reticustos](https://github.com/Su1ph3r/Reticustos) | [Indago](https://github.com/Su1ph3r/indago) | [BypassBurrito](https://github.com/Su1ph3r/bypassburrito) | [Ariadne](https://github.com/Su1ph3r/ariadne)
+
 ## Contributing
 
 Contributions welcome — especially new escape techniques and CVEs. See [CONTRIBUTING.md](CONTRIBUTING.md).
