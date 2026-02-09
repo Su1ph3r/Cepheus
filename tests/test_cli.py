@@ -99,6 +99,82 @@ def test_techniques_search_no_results():
     assert result.exit_code == 0
 
 
+def test_analyze_mitre_format(sample_posture_file, tmp_path):
+    output_path = tmp_path / "layer.json"
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--format", "mitre", "--output", str(output_path)])
+    assert result.exit_code == 0
+    assert output_path.exists()
+    import json
+    data = json.loads(output_path.read_text())
+    assert data["domain"] == "enterprise-attack"
+
+
+def test_analyze_mitre_format_stdout(sample_posture_file):
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--format", "mitre"])
+    assert result.exit_code == 0
+
+
+def test_analyze_html_format(sample_posture_file, tmp_path):
+    output_path = tmp_path / "report.html"
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--format", "html", "--output", str(output_path)])
+    assert result.exit_code == 0
+    assert output_path.exists()
+    content = output_path.read_text()
+    assert "<!DOCTYPE html>" in content
+
+
+def test_diff_command(tmp_path):
+    privileged = {
+        "hostname": "before",
+        "kernel": {"version": "5.10.0", "major": 5, "minor": 10, "patch": 0},
+        "capabilities": {"effective": ["CAP_SYS_ADMIN"], "bounding": [], "permitted": []},
+        "security": {"seccomp": "disabled", "apparmor": None, "selinux": None},
+        "runtime": {"runtime": "docker", "privileged": True, "pid_one": "bash"},
+        "network": {"interfaces": [], "can_reach_metadata": False, "can_reach_docker_sock": False},
+        "credentials": {"service_account_token": False},
+        "cgroup_version": 1,
+        "writable_paths": [],
+        "available_tools": [],
+    }
+    hardened = {
+        "hostname": "after",
+        "kernel": {"version": "6.8.1", "major": 6, "minor": 8, "patch": 1},
+        "capabilities": {"effective": [], "bounding": [], "permitted": []},
+        "security": {"seccomp": "filtering", "apparmor": "docker-default", "selinux": None},
+        "runtime": {"runtime": "containerd", "privileged": False, "pid_one": "app"},
+        "network": {"interfaces": [], "can_reach_metadata": False, "can_reach_docker_sock": False},
+        "credentials": {"service_account_token": False},
+        "cgroup_version": 2,
+        "writable_paths": [],
+        "available_tools": [],
+    }
+    before_file = tmp_path / "before.json"
+    after_file = tmp_path / "after.json"
+    before_file.write_text(json.dumps(privileged))
+    after_file.write_text(json.dumps(hardened))
+    result = runner.invoke(app, ["diff", str(before_file), str(after_file)])
+    assert result.exit_code == 0
+
+
+def test_diff_json_format(tmp_path):
+    posture = {
+        "hostname": "test",
+        "kernel": {"version": "5.10.0", "major": 5, "minor": 10, "patch": 0},
+        "capabilities": {"effective": [], "bounding": [], "permitted": []},
+        "security": {"seccomp": "filtering"},
+        "runtime": {"runtime": "docker", "privileged": False, "pid_one": "app"},
+        "network": {"interfaces": [], "can_reach_metadata": False, "can_reach_docker_sock": False},
+        "credentials": {"service_account_token": False},
+        "cgroup_version": 1,
+        "writable_paths": [],
+        "available_tools": [],
+    }
+    f = tmp_path / "posture.json"
+    f.write_text(json.dumps(posture))
+    result = runner.invoke(app, ["diff", str(f), str(f), "--format", "json"])
+    assert result.exit_code == 0
+
+
 def test_no_args_shows_help():
     result = runner.invoke(app, [])
     # Typer no_args_is_help exits with code 0 or 2 depending on version

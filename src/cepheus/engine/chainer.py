@@ -104,37 +104,46 @@ def build_combinatorial_chains(
     # (credentials obtained via info leak → used for escalation)
     for info_tech, info_conf, info_poc in info_techs:
         for esc_tech, esc_conf, esc_poc in non_combo_techs:
-            # Only pair if the info technique could enable the escalation
             if not _is_useful_pairing(info_tech, esc_tech):
                 continue
+            chains.append(_build_two_step_chain(info_tech, info_conf, info_poc, esc_tech, esc_conf, esc_poc))
 
-            step1 = ChainStep(
-                technique=info_tech,
-                poc_command=info_poc,
-                prerequisite_confidence=info_conf,
-            )
-            step2 = ChainStep(
-                technique=esc_tech,
-                poc_command=esc_poc,
-                prerequisite_confidence=esc_conf,
-            )
-            avg_conf = (info_conf + esc_conf) / 2
-            avg_reliability = (info_tech.reliability + esc_tech.reliability) / 2
-            avg_stealth = (info_tech.stealth + esc_tech.stealth) / 2
-            severity = _highest_severity([step1, step2])
-
-            chain = EscapeChain(
-                id=_chain_id([info_tech.id, esc_tech.id]),
-                steps=[step1, step2],
-                reliability_score=avg_reliability,
-                stealth_score=avg_stealth,
-                confidence_score=avg_conf,
-                severity=severity,
-                description=f"[Chain] {info_tech.name} → {esc_tech.name}",
-            )
-            chains.append(chain)
+    # Build natural two-step chains between non-combo, non-info techniques
+    # (e.g., LSM unconfined + capability escape, socket + SA token)
+    all_matchable = non_combo_techs + info_techs
+    for tech_a, conf_a, poc_a in all_matchable:
+        for tech_b, conf_b, poc_b in non_combo_techs:
+            if tech_a.id == tech_b.id:
+                continue
+            if tech_a.category == TechniqueCategory.INFO_DISCLOSURE:
+                continue  # Already handled above
+            if not _is_useful_pairing(tech_a, tech_b):
+                continue
+            chains.append(_build_two_step_chain(tech_a, conf_a, poc_a, tech_b, conf_b, poc_b))
 
     return chains
+
+
+def _build_two_step_chain(
+    tech_a: EscapeTechnique, conf_a: float, poc_a: str,
+    tech_b: EscapeTechnique, conf_b: float, poc_b: str,
+) -> EscapeChain:
+    """Build a two-step chain from two matched techniques."""
+    step1 = ChainStep(technique=tech_a, poc_command=poc_a, prerequisite_confidence=conf_a)
+    step2 = ChainStep(technique=tech_b, poc_command=poc_b, prerequisite_confidence=conf_b)
+    avg_conf = (conf_a + conf_b) / 2
+    avg_reliability = (tech_a.reliability + tech_b.reliability) / 2
+    avg_stealth = (tech_a.stealth + tech_b.stealth) / 2
+    severity = _highest_severity([step1, step2])
+    return EscapeChain(
+        id=_chain_id([tech_a.id, tech_b.id]),
+        steps=[step1, step2],
+        reliability_score=avg_reliability,
+        stealth_score=avg_stealth,
+        confidence_score=avg_conf,
+        severity=severity,
+        description=f"[Chain] {tech_a.name} → {tech_b.name}",
+    )
 
 
 def _is_useful_pairing(info_tech: EscapeTechnique, esc_tech: EscapeTechnique) -> bool:
@@ -153,5 +162,15 @@ def _is_useful_pairing(info_tech: EscapeTechnique, esc_tech: EscapeTechnique) ->
         ("env_secret_leak", "k8s_service_account"),
         # Cloud metadata + cloud SSRF
         ("cloud_metadata_creds", "cloud_metadata_ssrf"),
+        # LSM unconfined + capability escapes
+        ("lsm_apparmor_unconfined", "cap_sys_admin_mount"),
+        ("lsm_apparmor_unconfined", "cap_sys_admin_cgroup_escape"),
+        ("lsm_selinux_unconfined", "cap_sys_admin_mount"),
+        ("lsm_selinux_unconfined", "cap_sys_admin_cgroup_escape"),
+        # Shared memory + ptrace
+        ("tmpfs_shm_cross_container", "cap_sys_ptrace"),
+        # containerd/crio socket + K8s service account
+        ("containerd_sock_mount", "k8s_service_account"),
+        ("crio_sock_mount", "k8s_service_account"),
     }
     return (info_tech.id, esc_tech.id) in useful_pairs

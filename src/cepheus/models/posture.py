@@ -45,6 +45,8 @@ class NetworkInfo(BaseModel):
     interfaces: list[str] = Field(default_factory=list)
     can_reach_metadata: bool = False
     can_reach_docker_sock: bool = False
+    can_reach_containerd_sock: bool = False
+    can_reach_crio_sock: bool = False
     listening_ports: list[int] = Field(default_factory=list)
 
 
@@ -60,6 +62,18 @@ class RuntimeInfo(BaseModel):
     orchestrator: str | None = None
     privileged: bool = False
     pid_one: str = "unknown"
+    runc_version: str | None = None
+
+
+class KubernetesInfo(BaseModel):
+    rbac_permissions: list[str] = Field(default_factory=list)
+    pod_security_standard: str | None = None
+    has_sidecar: bool = False
+    sidecar_type: str | None = None
+    node_access_indicators: list[str] = Field(default_factory=list)
+    namespace: str | None = None
+    pod_name: str | None = None
+    node_name: str | None = None
 
 
 class ContainerPosture(BaseModel):
@@ -74,6 +88,7 @@ class ContainerPosture(BaseModel):
     network: NetworkInfo = Field(default_factory=NetworkInfo)
     credentials: CredentialInfo = Field(default_factory=CredentialInfo)
     runtime: RuntimeInfo = Field(default_factory=RuntimeInfo)
+    kubernetes: KubernetesInfo = Field(default_factory=KubernetesInfo)
     cgroup_version: int = 1
     writable_paths: list[str] = Field(default_factory=list)
     available_tools: list[str] = Field(default_factory=list)

@@ -132,6 +132,18 @@ def evaluate_prerequisite(posture: ContainerPosture, prereq: Prerequisite) -> fl
         except re.error:
             return prereq.confidence_if_absent
 
+    if check == "version_lte":
+        if value is None or value == "":
+            return prereq.confidence_if_absent
+        try:
+            val_tuple = _parse_kernel_version(str(value))
+            target_tuple = _parse_kernel_version(str(prereq.check_value))
+            if val_tuple == (0, 0, 0):
+                return prereq.confidence_if_absent
+            return prereq.confidence_if_met if val_tuple <= target_tuple else 0.0
+        except (TypeError, ValueError):
+            return prereq.confidence_if_absent
+
     # Unknown check type — treat as absent
     return prereq.confidence_if_absent
 

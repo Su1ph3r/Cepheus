@@ -54,6 +54,7 @@ Cepheus uses a declarative technique database. To add a new technique:
 | `exists` | Field is not None | `true` |
 | `not_empty` | List is non-empty | `true` |
 | `regex` | Regex match | `"^/pause"` |
+| `version_lte` | Semver version comparison (<=) | `"1.1.12"` |
 
 ## Code Style
 
@@ -75,7 +76,7 @@ pytest --cov=cepheus --cov-report=term-missing
 pytest tests/test_engine/test_matcher.py
 ```
 
-All PRs must maintain or improve test coverage. The test suite currently has 105 tests.
+All PRs must maintain or improve test coverage. The test suite currently has 144 tests.
 
 ## Pull Request Process
 

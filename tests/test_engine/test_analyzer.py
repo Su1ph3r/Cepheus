@@ -62,7 +62,7 @@ def test_analyze_privileged(privileged_posture):
     result = analyze(privileged_posture)
     assert result.techniques_matched > 5
     assert len(result.chains) > 0
-    assert result.total_techniques_checked == 44
+    assert result.total_techniques_checked == 56
     # Should have remediations
     assert len(result.remediations) > 0
     # First chain should be high-scoring
@@ -86,7 +86,7 @@ def test_analyze_empty_posture():
     from cepheus.engine.analyzer import analyze
 
     result = analyze(ContainerPosture())
-    assert result.total_techniques_checked == 44
+    assert result.total_techniques_checked == 56
     assert result.analysis_timestamp != ""
 
 

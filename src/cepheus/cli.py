@@ -26,6 +26,13 @@ _CONTAINER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$")
 class OutputFormat(str, Enum):
     terminal = "terminal"
     json = "json"
+    mitre = "mitre"
+    html = "html"
+
+
+class DiffFormat(str, Enum):
+    terminal = "terminal"
+    json = "json"
 
 
 class SeverityFilter(str, Enum):
@@ -43,15 +50,8 @@ class ContainerRuntime(str, Enum):
 SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
-@app.command()
-def analyze(
-    posture_file: Path = typer.Argument(..., help="Path to posture JSON from enumerator"),
-    format: OutputFormat = typer.Option(OutputFormat.terminal, "--format", "-f", help="Output format"),
-    min_severity: SeverityFilter = typer.Option(SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"),
-    llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Write JSON report to file"),
-) -> None:
-    """Analyze a container posture JSON file and identify escape paths."""
+def _load_posture(posture_file: Path):
+    """Load and validate a posture JSON file, exiting on errors."""
     if not posture_file.exists():
         console.print(f"[red]Error: File not found: {posture_file}[/red]")
         raise typer.Exit(1)
@@ -65,11 +65,22 @@ def analyze(
     from cepheus.models.posture import ContainerPosture
 
     try:
-        posture = ContainerPosture.model_validate(data)
+        return ContainerPosture.model_validate(data)
     except Exception as e:
         console.print(f"[red]Error: Invalid posture data: {e}[/red]")
         raise typer.Exit(1)
 
+
+@app.command()
+def analyze(
+    posture_file: Path = typer.Argument(..., help="Path to posture JSON from enumerator"),
+    format: OutputFormat = typer.Option(OutputFormat.terminal, "--format", "-f", help="Output format"),
+    min_severity: SeverityFilter = typer.Option(SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"),
+    llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
+) -> None:
+    """Analyze a container posture JSON file and identify escape paths."""
+    posture = _load_posture(posture_file)
     config = CepheusConfig()
 
     from cepheus.engine.analyzer import analyze as run_analysis
@@ -93,8 +104,8 @@ def analyze(
     result.chains = [c for c in result.chains if SEVERITY_RANK.get(c.severity.value, 0) >= min_rank]
     result.remediations = [r for r in result.remediations if SEVERITY_RANK.get(r.severity.value, 0) >= min_rank]
 
-    # Write JSON report file if requested
-    if output:
+    # Write report file if requested (for non-stdout formats)
+    if output and format not in (OutputFormat.mitre, OutputFormat.html):
         from cepheus.output.json_report import write_report
 
         write_report(result, output)
@@ -106,10 +117,59 @@ def analyze(
 
         report = generate_report(result)
         console.print_json(json.dumps(report))
+    elif format == OutputFormat.mitre:
+        from cepheus.output.mitre_layer import generate_layer, write_layer
+
+        if output:
+            write_layer(result, output)
+            console.print(f"[green]MITRE ATT&CK Navigator layer written to {output}[/green]")
+        else:
+            layer = generate_layer(result)
+            console.print_json(json.dumps(layer))
+    elif format == OutputFormat.html:
+        try:
+            from cepheus.output.html_report import generate_html, write_html
+
+            if output:
+                write_html(result, output)
+                console.print(f"[green]HTML report written to {output}[/green]")
+            else:
+                console.print(generate_html(result))
+        except ImportError:
+            console.print("[red]Error: jinja2 is required for HTML reports. Run: pip install cepheus[html][/red]")
+            raise typer.Exit(1)
     else:
         from cepheus.output.terminal import print_analysis_result
 
         print_analysis_result(result)
+
+
+@app.command()
+def diff(
+    before_file: Path = typer.Argument(..., help="Path to 'before' posture JSON"),
+    after_file: Path = typer.Argument(..., help="Path to 'after' posture JSON"),
+    format: DiffFormat = typer.Option(DiffFormat.terminal, "--format", "-f", help="Output format"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write diff report to file"),
+) -> None:
+    """Compare two posture files and show security changes."""
+    before = _load_posture(before_file)
+    after = _load_posture(after_file)
+
+    from cepheus.engine.differ import diff_postures
+
+    diff_result = diff_postures(before, after)
+
+    if format == DiffFormat.json:
+        report = diff_result.model_dump(mode="json")
+        if output:
+            Path(output).write_text(json.dumps(report, indent=2))
+            console.print(f"[green]Diff report written to {output}[/green]")
+        else:
+            console.print_json(json.dumps(report))
+    else:
+        from cepheus.output.diff_terminal import print_diff_result
+
+        print_diff_result(diff_result)
 
 
 @app.command()

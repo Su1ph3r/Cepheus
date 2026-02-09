@@ -1,4 +1,4 @@
-"""Complete database of 44 container escape techniques."""
+"""Complete database of 56 container escape techniques."""
 
 from __future__ import annotations
 
@@ -13,9 +13,9 @@ _TECHNIQUES: list[EscapeTechnique] | None = None
 
 
 def _build_techniques() -> list[EscapeTechnique]:
-    """Build and return all 44 escape techniques."""
+    """Build and return all 56 escape techniques."""
     return [
-        # ── CAPABILITY (8) ───────────────────────────────────────────
+        # ── CAPABILITY (9) ───────────────────────────────────────────
         EscapeTechnique(
             id="cap_sys_admin_mount",
             name="Mount host filesystem via CAP_SYS_ADMIN",
@@ -240,7 +240,53 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.2,
             remediation="--cap-drop=SYS_RAWIO",
         ),
-        # ── MOUNT (8) ────────────────────────────────────────────────
+        EscapeTechnique(
+            id="ebpf_probe_write_user",
+            name="bpf_probe_write_user kernel manipulation",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.CRITICAL,
+            description=(
+                "With CAP_BPF or CAP_SYS_ADMIN, the bpf_probe_write_user "
+                "helper can write to user-space memory of any process, "
+                "enabling arbitrary code execution on the host."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description="Requires CAP_SYS_ADMIN (or CAP_BPF)",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_BPF",
+                    description="Requires CAP_BPF (or CAP_SYS_ADMIN)",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="kernel.version",
+                    check_type="kernel_gte",
+                    check_value="4.17.0",
+                    description="bpf_probe_write_user available from kernel 4.17+",
+                ),
+                Prerequisite(
+                    check_field="security.seccomp",
+                    check_type="not_equals",
+                    check_value="strict",
+                    description="Seccomp must not be in strict mode",
+                ),
+            ],
+            mitre_attack=["T1611", "T1068"],
+            references=[
+                "https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story",
+            ],
+            reliability=0.6,
+            stealth=0.7,
+            remediation="Drop CAP_SYS_ADMIN and CAP_BPF, enable seccomp",
+        ),
+        # ── MOUNT (15) ───────────────────────────────────────────────
         EscapeTechnique(
             id="docker_socket_mount",
             name="Docker socket mounted — host command exec",
@@ -457,7 +503,201 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.2,
             remediation="--privileged=false, use --device for specific needs",
         ),
-        # ── KERNEL (10) ──────────────────────────────────────────────
+        EscapeTechnique(
+            id="containerd_sock_mount",
+            name="Containerd socket access",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "Containerd socket is accessible from the container, allowing "
+                "direct containerd API access to manage containers on the host."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="network.can_reach_containerd_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description="Containerd socket must be reachable",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.9,
+            stealth=0.2,
+            remediation="Never mount containerd socket into containers",
+        ),
+        EscapeTechnique(
+            id="crio_sock_mount",
+            name="CRI-O socket access",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "CRI-O socket is accessible from the container, allowing "
+                "direct CRI API access to manage containers on the host."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="network.can_reach_crio_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description="CRI-O socket must be reachable",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.9,
+            stealth=0.2,
+            remediation="Never mount CRI-O socket into containers",
+        ),
+        EscapeTechnique(
+            id="systemd_cgroup_injection",
+            name="Systemd unit injection via writable cgroup v1",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "Writable cgroup v1 hierarchy under systemd allows creating "
+                "a transient systemd unit that executes on the host."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/sys/fs/cgroup",
+                    description="/sys/fs/cgroup must be writable",
+                ),
+                Prerequisite(
+                    check_field="cgroup_version",
+                    check_type="equals",
+                    check_value=1,
+                    description="Requires cgroup v1",
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description="Requires CAP_SYS_ADMIN capability",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/",
+            ],
+            reliability=0.8,
+            stealth=0.3,
+            remediation="Use cgroup v2, mount cgroups read-only, drop CAP_SYS_ADMIN",
+        ),
+        EscapeTechnique(
+            id="tmpfs_shm_cross_container",
+            name="Shared /dev/shm cross-container data exfil",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.MEDIUM,
+            description=(
+                "Writable /dev/shm shared between containers on the same host "
+                "allows cross-container data exchange and exfiltration."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/dev/shm",
+                    description="/dev/shm must be writable",
+                ),
+            ],
+            mitre_attack=["T1005", "T1080"],
+            references=[
+                "https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts",
+            ],
+            reliability=0.7,
+            stealth=0.8,
+            remediation="Use --ipc=private, restrict /dev/shm size",
+        ),
+        EscapeTechnique(
+            id="proc_fd_symlink_traversal",
+            name="/proc/self/fd symlink to host",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.HIGH,
+            description=(
+                "Symlinks in /proc/self/fd can point to host filesystem "
+                "locations, enabling file reads/writes outside the container."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/proc/self/fd",
+                    description="/proc/self/fd must be accessible and writable",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2024-21626",
+            ],
+            reliability=0.6,
+            stealth=0.5,
+            remediation="Restrict /proc access, use read-only /proc mounts",
+        ),
+        EscapeTechnique(
+            id="device_mapper_access",
+            name="Device-mapper direct access",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.HIGH,
+            description=(
+                "Direct access to device-mapper allows creating and manipulating "
+                "block device mappings, potentially accessing host storage."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/sys/devices/virtual/misc/device-mapper/dev",
+                    description="Device-mapper must be accessible",
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description="Requires CAP_SYS_ADMIN capability",
+                ),
+            ],
+            mitre_attack=["T1006"],
+            references=[
+                "https://man7.org/linux/man-pages/man8/dmsetup.8.html",
+            ],
+            reliability=0.5,
+            stealth=0.3,
+            remediation="Remove device-mapper access, drop CAP_SYS_ADMIN",
+        ),
+        EscapeTechnique(
+            id="vm_param_manipulation",
+            name="/proc/sys/vm parameter manipulation",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.MEDIUM,
+            description=(
+                "Writable /proc/sys/vm allows manipulation of kernel memory "
+                "management parameters, potentially causing host instability "
+                "or enabling side-channel attacks."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/proc/sys/vm",
+                    description="/proc/sys/vm must be writable",
+                ),
+            ],
+            mitre_attack=["T1529"],
+            references=[
+                "https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts",
+            ],
+            reliability=0.6,
+            stealth=0.4,
+            remediation="Mount /proc read-only or use seccomp",
+        ),
+        # ── KERNEL (12) ──────────────────────────────────────────────
         EscapeTechnique(
             id="cve_2022_0185",
             name="FSConfig heap overflow",
@@ -664,7 +904,15 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_field="capabilities.effective",
                     check_type="contains",
                     check_value="CAP_SYS_ADMIN",
-                    description="Requires CAP_SYS_ADMIN or CAP_BPF",
+                    description="Requires CAP_SYS_ADMIN (or CAP_BPF)",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_BPF",
+                    description="Requires CAP_BPF (or CAP_SYS_ADMIN)",
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1068"],
@@ -732,6 +980,13 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_value="6.7.0",
                     description="Kernel <= 6.7.0",
                 ),
+                Prerequisite(
+                    check_field="runtime.runc_version",
+                    check_type="version_lte",
+                    check_value="1.1.11",
+                    confidence_if_absent=0.5,
+                    description="runc <= 1.1.11 is vulnerable",
+                ),
             ],
             mitre_attack=["T1611"],
             references=[
@@ -743,7 +998,59 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.6,
             remediation="Update runc to >= 1.1.12",
         ),
-        # ── RUNTIME (8) ──────────────────────────────────────────────
+        EscapeTechnique(
+            id="cve_2024_53104",
+            name="USB Video Class OOB write",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.HIGH,
+            description=(
+                "Out-of-bounds write in the USB Video Class (UVC) driver "
+                "allows local privilege escalation via crafted USB device."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="kernel.version",
+                    check_type="kernel_lte",
+                    check_value="6.12.0",
+                    description="Kernel <= 6.12.0",
+                ),
+            ],
+            mitre_attack=["T1068"],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2024-53104",
+            ],
+            cve="CVE-2024-53104",
+            reliability=0.5,
+            stealth=0.3,
+            remediation="Update kernel to >= 6.12.1",
+        ),
+        EscapeTechnique(
+            id="cve_2025_21756",
+            name="vsock use-after-free",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.CRITICAL,
+            description=(
+                "Use-after-free in vsock transport allows arbitrary code "
+                "execution in the kernel, enabling container escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="kernel.version",
+                    check_type="kernel_lte",
+                    check_value="6.14.0",
+                    description="Kernel <= 6.14.0",
+                ),
+            ],
+            mitre_attack=["T1068"],
+            references=[
+                "https://nvd.nist.gov/vuln/detail/CVE-2025-21756",
+            ],
+            cve="CVE-2025-21756",
+            reliability=0.65,
+            stealth=0.4,
+            remediation="Update kernel to >= 6.14.1",
+        ),
+        # ── RUNTIME (10) ─────────────────────────────────────────────
         EscapeTechnique(
             id="k8s_service_account",
             name="K8s SA token privilege escalation",
@@ -932,6 +1239,58 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.8,
             remediation="Block 169.254.169.254 via network policy",
+        ),
+        EscapeTechnique(
+            id="lsm_apparmor_unconfined",
+            name="AppArmor unconfined profile",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "Container runs without AppArmor confinement, removing "
+                "mandatory access control restrictions on system calls "
+                "and file access."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="security.apparmor",
+                    check_type="equals",
+                    check_value=None,
+                    description="AppArmor must be unconfined (None)",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://docs.docker.com/engine/security/apparmor/",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="Apply AppArmor profile: --security-opt apparmor=docker-default",
+        ),
+        EscapeTechnique(
+            id="lsm_selinux_unconfined",
+            name="SELinux disabled/unconfined",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "SELinux is disabled or set to unconfined, removing "
+                "mandatory access control that would restrict container "
+                "access to host resources."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="security.selinux",
+                    check_type="equals",
+                    check_value=None,
+                    description="SELinux must be disabled or unconfined",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://docs.docker.com/engine/security/selinux/",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="Enable SELinux: --security-opt label=type:container_t",
         ),
         EscapeTechnique(
             id="k8s_node_proxy",
@@ -1261,7 +1620,7 @@ def _build_techniques() -> list[EscapeTechnique]:
 
 
 def get_all_techniques() -> list[EscapeTechnique]:
-    """Return all 44 escape techniques."""
+    """Return all 56 escape techniques."""
     global _TECHNIQUES
     if _TECHNIQUES is None:
         _TECHNIQUES = _build_techniques()

@@ -5,7 +5,7 @@
 Cepheus is a two-component container escape modeling tool:
 
 1. **Enumerator** (`cepheus-enum.sh`) — POSIX shell script that runs inside a container and dumps its security posture to JSON
-2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 44 known escape techniques, builds attack chains, scores them, and generates remediation guidance
+2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 56 known escape techniques, builds attack chains, scores them, and generates remediation guidance
 
 ## Data Flow
 
@@ -45,27 +45,31 @@ Cepheus/
 ├── enumerator/
 │   └── cepheus-enum.sh               # POSIX shell enumerator (zero deps)
 ├── src/cepheus/
-│   ├── cli.py                        # Typer CLI (analyze, enumerate, techniques)
+│   ├── cli.py                        # Typer CLI (analyze, enumerate, techniques, diff)
 │   ├── config.py                     # CepheusConfig (env vars via pydantic-settings)
 │   ├── models/
-│   │   ├── posture.py                # ContainerPosture + 10 sub-models
+│   │   ├── posture.py                # ContainerPosture + KubernetesInfo + sub-models
 │   │   ├── technique.py              # EscapeTechnique + Prerequisite DSL
 │   │   ├── chain.py                  # EscapeChain + ChainStep
 │   │   └── result.py                 # AnalysisResult + RemediationItem
 │   ├── engine/
-│   │   ├── technique_db.py           # 44 techniques, declarative prerequisites
+│   │   ├── technique_db.py           # 56 techniques, declarative prerequisites
 │   │   ├── poc_templates.py          # PoC command templates + SafeFormatDict
 │   │   ├── matcher.py                # Prerequisite evaluation engine
 │   │   ├── chainer.py                # Single + combinatorial chain builder
 │   │   ├── scorer.py                 # Weighted composite scoring
+│   │   ├── differ.py                 # Posture diff/delta comparison
 │   │   └── analyzer.py               # Orchestrator pipeline
 │   ├── llm/
 │   │   ├── client.py                 # LLMClient (LiteLLM wrapper)
 │   │   └── prompts.py                # System + analysis + summary prompts
 │   └── output/
 │       ├── terminal.py               # Rich terminal output (tables, panels)
-│       └── json_report.py            # JSON serialization
-└── tests/                            # 105 tests across all modules
+│       ├── json_report.py            # JSON serialization
+│       ├── html_report.py            # Self-contained HTML report (Jinja2)
+│       ├── mitre_layer.py            # MITRE ATT&CK Navigator layer export
+│       └── diff_terminal.py          # Diff/delta terminal output
+└── tests/                            # 144 tests across all modules
 ```
 
 ## Engine Pipeline
@@ -73,12 +77,12 @@ Cepheus/
 The analysis engine runs a deterministic pipeline:
 
 ### 1. Technique Loading
-`technique_db.py` provides 44 `EscapeTechnique` objects, each with declarative `Prerequisite` checks.
+`technique_db.py` provides 56 `EscapeTechnique` objects, each with declarative `Prerequisite` checks.
 
 ### 2. Prerequisite Matching
 `matcher.py` evaluates each technique's prerequisites against the container posture:
 - Resolves dot-paths into the Pydantic model (e.g., `capabilities.effective`)
-- Applies typed checks: `contains`, `equals`, `not_equals`, `gte`, `lte`, `kernel_gte`, `kernel_lte`, `kernel_between`, `exists`, `not_empty`, `regex`
+- Applies typed checks: `contains`, `equals`, `not_equals`, `gte`, `lte`, `kernel_gte`, `kernel_lte`, `kernel_between`, `exists`, `not_empty`, `regex`, `version_lte`
 - Missing fields use `confidence_if_absent` (default 0.3) rather than failing — handles incomplete enumeration gracefully
 
 ### 3. Chain Building
@@ -98,7 +102,14 @@ length_penalty = 1.0 / (1.0 + 0.15 × (chain_length - 1))
 The analyzer extracts remediation guidance and runtime flags from matched techniques, sorted by severity.
 
 ### 6. Output
-Results render as Rich terminal tables/panels or JSON reports.
+Results render in multiple formats:
+- **Terminal** — Rich tables and panels with color-coded severity
+- **JSON** — Machine-readable report for automation
+- **HTML** — Self-contained HTML report with inline CSS (requires `jinja2`)
+- **MITRE ATT&CK** — Navigator v4.5 layer JSON for ATT&CK heatmaps
+
+### 7. Diff/Delta
+`differ.py` compares two posture analyses to show remediated and newly introduced risks, with color-coded terminal output (green=remediated, red=new, yellow=changed).
 
 ## Enumerator Design
 
@@ -115,7 +126,9 @@ Key enumeration sources:
 - `/sys/fs/cgroup/` — cgroup version detection
 - `/proc/self/attr/current` — AppArmor/SELinux
 - `/proc/1/ns/*` vs `/proc/self/ns/*` — namespace isolation
-- Network probes — cloud metadata (169.254.169.254), Docker socket
+- Network probes — cloud metadata (169.254.169.254), Docker/containerd/CRI-O sockets
+- Kubernetes — RBAC permissions, pod security standard, sidecar detection, node access indicators
+- Runtime versions — Docker, containerd, CRI-O, runc version detection
 - Environment variables — secret detection (names only, not values)
 
 ## Configuration

@@ -282,6 +282,24 @@ def test_match_technique_one_fails():
     assert confidence == 0.0
 
 
+def test_version_lte_pass():
+    p = ContainerPosture(runtime=RuntimeInfo(runc_version="1.1.10"))
+    prereq = Prerequisite(check_field="runtime.runc_version", check_type="version_lte", check_value="1.1.12")
+    assert evaluate_prerequisite(p, prereq) == 1.0
+
+
+def test_version_lte_fail():
+    p = ContainerPosture(runtime=RuntimeInfo(runc_version="1.2.0"))
+    prereq = Prerequisite(check_field="runtime.runc_version", check_type="version_lte", check_value="1.1.12")
+    assert evaluate_prerequisite(p, prereq) == 0.0
+
+
+def test_version_lte_missing():
+    p = ContainerPosture(runtime=RuntimeInfo(runc_version=None))
+    prereq = Prerequisite(check_field="runtime.runc_version", check_type="version_lte", check_value="1.1.12")
+    assert evaluate_prerequisite(p, prereq) == 0.3
+
+
 def test_match_technique_no_prerequisites():
     p = ContainerPosture()
     t = EscapeTechnique(

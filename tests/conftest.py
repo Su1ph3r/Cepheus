@@ -10,6 +10,7 @@ from cepheus.models.posture import (
     ContainerPosture,
     CredentialInfo,
     KernelInfo,
+    KubernetesInfo,
     MountInfo,
     NamespaceInfo,
     NetworkInfo,
@@ -87,6 +88,8 @@ def privileged_posture() -> ContainerPosture:
             interfaces=["eth0", "lo"],
             can_reach_metadata=True,
             can_reach_docker_sock=True,
+            can_reach_containerd_sock=True,
+            can_reach_crio_sock=False,
             listening_ports=[8080, 2375],
         ),
         credentials=CredentialInfo(
@@ -99,6 +102,12 @@ def privileged_posture() -> ContainerPosture:
             privileged=True,
             pid_one="bash",
             orchestrator="kubernetes",
+            runc_version="1.1.10",
+        ),
+        kubernetes=KubernetesInfo(
+            namespace="default",
+            pod_name="debug-pod",
+            pod_security_standard="privileged",
         ),
         cgroup_version=1,
         writable_paths=[
@@ -107,6 +116,8 @@ def privileged_posture() -> ContainerPosture:
             "/sys/fs/cgroup",
             "/sys",
             "/dev",
+            "/dev/shm",
+            "/proc/sys/vm",
         ],
         available_tools=["curl", "wget", "mount", "nsenter", "python3"],
     )
@@ -187,4 +198,27 @@ def sample_chain(sample_technique) -> EscapeChain:
         confidence_score=1.0,
         severity=Severity.CRITICAL,
         description="CAP_SYS_ADMIN mount escape",
+    )
+
+
+@pytest.fixture
+def sample_analysis_result(sample_posture, sample_chain, sample_technique):
+    """A basic AnalysisResult for unit tests."""
+    from cepheus.models.result import AnalysisResult, RemediationItem
+
+    return AnalysisResult(
+        posture=sample_posture,
+        chains=[sample_chain],
+        total_techniques_checked=56,
+        techniques_matched=1,
+        remediations=[
+            RemediationItem(
+                technique_id=sample_technique.id,
+                severity=sample_technique.severity,
+                current_state=sample_technique.description,
+                recommended_fix=sample_technique.remediation,
+                runtime_flag="--cap-drop=ALL",
+            ),
+        ],
+        analysis_timestamp="2024-06-15T10:30:00Z",
     )

@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-105%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen.svg)](#testing)
 
 ---
 
@@ -14,7 +14,7 @@ Cepheus is a two-component container security tool that answers one question: **
 
 1. **Enumerator** — a zero-dependency POSIX shell script that runs inside any container and dumps its full security posture to JSON (capabilities, mounts, kernel version, seccomp, AppArmor, namespaces, cgroups, credentials, network config, writable paths, and available tools).
 
-2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **44 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance.
+2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **56 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance.
 
 Named after the constellation Cepheus — the king who watches over the heavens — it watches over container boundaries.
 
@@ -23,11 +23,11 @@ Named after the constellation Cepheus — the king who watches over the heavens 
 | Feature | deepce | CDK | amicontained | BOtB | Cepheus |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Capability enumeration | Partial | Yes | Yes | Partial | **Full** |
-| Kernel CVE correlation | - | - | - | - | **10 CVEs** |
+| Kernel CVE correlation | - | - | - | - | **12 CVEs** |
 | Runtime version detection | - | Partial | - | - | **Yes** |
-| Combinatorial chain analysis | - | - | - | - | **6 combos** |
+| Combinatorial chain analysis | - | - | - | - | **9+ combos** |
 | Escape path scoring | - | - | - | - | **Weighted** |
-| PoC generation | - | Some | - | Some | **All 44** |
+| PoC generation | - | Some | - | Some | **All 56** |
 | Defense enumeration | - | - | Partial | - | **Full** |
 | 2024-2025 CVEs | - | - | - | - | **Yes** |
 | Stealth scoring | - | - | - | - | **Yes** |
@@ -47,6 +47,9 @@ pip install -e .
 
 # With LLM support
 pip install -e ".[llm]"
+
+# With HTML report support
+pip install -e ".[html]"
 ```
 
 ### Enumerate a Container
@@ -72,14 +75,30 @@ cepheus analyze posture.json --min-severity high
 # JSON output for automation
 cepheus analyze posture.json --format json -o report.json
 
+# MITRE ATT&CK Navigator layer export
+cepheus analyze posture.json --format mitre -o layer.json
+
+# Self-contained HTML report
+cepheus analyze posture.json --format html -o report.html
+
 # With LLM-powered novel pattern analysis
 cepheus analyze posture.json --llm
+```
+
+### Compare Postures (Diff)
+
+```bash
+# Compare before/after hardening
+cepheus diff before.json after.json
+
+# JSON output
+cepheus diff before.json after.json --format json -o delta.json
 ```
 
 ### Browse Techniques
 
 ```bash
-# List all 44 techniques
+# List all 56 techniques
 cepheus techniques
 
 # Filter by category
@@ -93,15 +112,15 @@ cepheus techniques --severity critical
 
 ## Technique Coverage
 
-Cepheus covers **44 escape techniques** across 6 categories:
+Cepheus covers **56 escape techniques** across 6 categories:
 
-### Capability-Based (8)
-Escapes leveraging Linux capabilities: `CAP_SYS_ADMIN` mount/cgroup/BPF attacks, `CAP_SYS_PTRACE` process injection, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` for bypassing file permissions, `CAP_NET_ADMIN` network namespace manipulation, and `CAP_SYS_RAWIO` raw device I/O.
+### Capability-Based (9)
+Escapes leveraging Linux capabilities: `CAP_SYS_ADMIN` mount/cgroup/BPF attacks, `CAP_SYS_PTRACE` process injection, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` for bypassing file permissions, `CAP_NET_ADMIN` network namespace manipulation, `CAP_SYS_RAWIO` raw device I/O, and eBPF `bpf_probe_write_user` kernel memory manipulation.
 
-### Mount-Based (8)
-Docker socket mounts, `/proc/sys/kernel/core_pattern` writes, `/proc/sysrq-trigger` abuse, sysfs exploitation, writable host path mounts (`/etc`, `/`), cgroup filesystem escapes, and `/dev` device access.
+### Mount-Based (15)
+Docker socket mounts, containerd and CRI-O socket mounts, `/proc/sys/kernel/core_pattern` writes, `/proc/sysrq-trigger` abuse, sysfs exploitation, writable host path mounts (`/etc`, `/`), cgroup filesystem escapes, `/dev` device access, systemd cgroup v1 injection, shared `/dev/shm` cross-container data exfiltration, `/proc/self/fd` symlink traversal, device-mapper direct access, and `/proc/sys/vm` parameter manipulation.
 
-### Kernel CVE-Based (10)
+### Kernel CVE-Based (12)
 - **CVE-2022-0185** — FSConfig heap overflow (5.1–5.16.2)
 - **CVE-2022-0847** — DirtyPipe (5.8–5.16.11)
 - **CVE-2021-22555** — Netfilter heap OOB write (2.6.19–5.12)
@@ -112,12 +131,14 @@ Docker socket mounts, `/proc/sys/kernel/core_pattern` writes, `/proc/sysrq-trigg
 - **CVE-2021-31440** — eBPF verifier bypass
 - **CVE-2022-23222** — eBPF type confusion
 - **CVE-2024-21626** — runc process.cwd container breakout
+- **CVE-2024-53104** — USB Video Class OOB write
+- **CVE-2025-21756** — vsock use-after-free
 
-### Runtime / Orchestrator (8)
-Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, and kubelet node proxy.
+### Runtime / Orchestrator (10)
+Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, kubelet node proxy, AppArmor unconfined profile detection, and SELinux disabled/unconfined detection.
 
 ### Combinatorial (6)
-Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`.
+Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`, LSM unconfined + capability escalation, and shared memory + ptrace injection.
 
 ### Information Disclosure (4)
 Environment variable secret leaks, cloud instance credential theft via metadata service, Kubernetes configmap/secret volume mounts, and Docker environment inspection via API.
@@ -157,10 +178,11 @@ What it enumerates:
 - **Cgroups** — v1 vs v2 detection
 - **Security** — seccomp mode, AppArmor profile, SELinux context
 - **Namespaces** — PID/net/mnt/user/UTS/IPC/cgroup isolation via inode comparison
-- **Network** — interfaces, cloud metadata reachability, Docker socket access, listening ports
+- **Network** — interfaces, cloud metadata reachability, Docker/containerd/CRI-O socket access, listening ports
 - **Credentials** — K8s service account tokens, environment variable names matching secret patterns, cloud metadata availability
-- **Runtime** — Docker/containerd/cri-o/Kubernetes detection, PID 1 process
-- **Tools** — 30+ binary availability checks (curl, wget, gcc, mount, nsenter, etc.)
+- **Runtime** — Docker/containerd/cri-o/Kubernetes detection, PID 1 process, runc version detection
+- **Kubernetes** — RBAC permissions, pod security standard, sidecar detection, node access indicators
+- **Tools** — 30+ binary availability checks (curl, wget, gcc, mount, nsenter, docker, kubectl, runc, etc.)
 - **Writable paths** — sensitive path write access testing
 
 Output is a single JSON object conforming to the `ContainerPosture` schema.
@@ -198,7 +220,8 @@ Enumerator (POSIX sh)          Analysis Engine (Python)
                                │   ↓                  │
                                │ Scorer               │
                                │   ↓                  │
-                               │ Output (terminal/JSON)│
+                               │ Output (terminal/JSON/│
+│        HTML/MITRE)     │
                                │   ↓ (optional)       │
                                │ LLM Enrichment       │
                                └──────────────────────┘
@@ -226,7 +249,7 @@ cepheus analyze posture.json --llm
 
 ```bash
 pip install -e ".[dev]"
-pytest                                     # 105 tests
+pytest                                     # 144 tests
 pytest --cov=cepheus --cov-report=term     # with coverage
 ```
 

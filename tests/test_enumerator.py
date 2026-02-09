@@ -98,7 +98,7 @@ def test_all_top_level_keys_present(enumerator_json):
     expected = {
         "enumeration_version", "timestamp", "hostname", "kernel",
         "capabilities", "mounts", "namespaces", "security",
-        "network", "credentials", "runtime", "cgroup_version",
+        "network", "credentials", "runtime", "kubernetes", "cgroup_version",
         "writable_paths", "available_tools",
     }
     assert expected == set(enumerator_json.keys()), (
@@ -151,6 +151,8 @@ def test_network_structure(enumerator_json):
     assert isinstance(n["interfaces"], list)
     assert isinstance(n["can_reach_metadata"], bool)
     assert isinstance(n["can_reach_docker_sock"], bool)
+    assert isinstance(n["can_reach_containerd_sock"], bool)
+    assert isinstance(n["can_reach_crio_sock"], bool)
     assert isinstance(n["listening_ports"], list)
 
 
@@ -173,9 +175,10 @@ def test_runtime_structure(enumerator_json):
     assert isinstance(r["runtime"], str)
     assert isinstance(r["privileged"], bool)
     assert isinstance(r["pid_one"], str)
-    # runtime_version and orchestrator can be null
+    # runtime_version, orchestrator, and runc_version can be null
     assert r["runtime_version"] is None or isinstance(r["runtime_version"], str)
     assert r["orchestrator"] is None or isinstance(r["orchestrator"], str)
+    assert r["runc_version"] is None or isinstance(r["runc_version"], str)
 
 
 def test_cgroup_version(enumerator_json):
@@ -188,3 +191,22 @@ def test_available_tools_has_sh(enumerator_json):
 
 def test_writable_paths_is_list(enumerator_json):
     assert isinstance(enumerator_json["writable_paths"], list)
+
+
+def test_kubernetes_structure(enumerator_json):
+    k = enumerator_json["kubernetes"]
+    assert isinstance(k["rbac_permissions"], list)
+    assert k["pod_security_standard"] is None or isinstance(k["pod_security_standard"], str)
+    assert isinstance(k["has_sidecar"], bool)
+    assert k["sidecar_type"] is None or isinstance(k["sidecar_type"], str)
+    assert isinstance(k["node_access_indicators"], list)
+    assert k["namespace"] is None or isinstance(k["namespace"], str)
+    assert k["pod_name"] is None or isinstance(k["pod_name"], str)
+    assert k["node_name"] is None or isinstance(k["node_name"], str)
+
+
+def test_script_has_new_writable_paths():
+    content = SCRIPT_PATH.read_text()
+    for path in ["/dev/shm", "/proc/sys/vm", "/sys/kernel/security",
+                 "/run/containerd/containerd.sock", "/var/run/crio/crio.sock"]:
+        assert path in content, f"Expected writable path '{path}' not found in script"

