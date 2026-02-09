@@ -1,0 +1,106 @@
+"""Tests for the Cepheus CLI."""
+
+import json
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from cepheus.cli import app
+
+runner = CliRunner()
+
+
+@pytest.fixture
+def sample_posture_file(tmp_path):
+    """Create a sample posture JSON file for testing."""
+    posture = {
+        "enumeration_version": "0.1.0",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "hostname": "test-container",
+        "kernel": {"version": "5.10.0", "major": 5, "minor": 10, "patch": 0},
+        "capabilities": {"effective": ["CAP_SYS_ADMIN", "CAP_NET_RAW"], "bounding": [], "permitted": []},
+        "mounts": [],
+        "namespaces": {"pid": True, "net": True, "mnt": True, "user": True, "uts": True, "ipc": True, "cgroup": True},
+        "security": {"seccomp": "disabled", "apparmor": None, "selinux": None},
+        "network": {"interfaces": ["eth0"], "can_reach_metadata": False, "can_reach_docker_sock": False, "listening_ports": []},
+        "credentials": {"service_account_token": False, "environment_secrets": [], "cloud_metadata_available": False},
+        "runtime": {"runtime": "docker", "runtime_version": None, "orchestrator": None, "privileged": False, "pid_one": "bash"},
+        "cgroup_version": 1,
+        "writable_paths": [],
+        "available_tools": [],
+    }
+    path = tmp_path / "posture.json"
+    path.write_text(json.dumps(posture))
+    return path
+
+
+def test_analyze_terminal_format(sample_posture_file):
+    result = runner.invoke(app, ["analyze", str(sample_posture_file)])
+    assert result.exit_code == 0
+    assert "Analysis Summary" in result.output or "Escape Chains" in result.output
+
+
+def test_analyze_json_format(sample_posture_file):
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--format", "json"])
+    assert result.exit_code == 0
+
+
+def test_analyze_with_output_file(sample_posture_file, tmp_path):
+    output_path = tmp_path / "report.json"
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--output", str(output_path)])
+    assert result.exit_code == 0
+    assert output_path.exists()
+    report = json.loads(output_path.read_text())
+    assert "chains" in report
+    assert "remediations" in report
+
+
+def test_analyze_file_not_found():
+    result = runner.invoke(app, ["analyze", "/nonexistent/file.json"])
+    assert result.exit_code == 1
+
+
+def test_analyze_invalid_json(tmp_path):
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_text("not json at all")
+    result = runner.invoke(app, ["analyze", str(bad_file)])
+    assert result.exit_code == 1
+
+
+def test_analyze_min_severity(sample_posture_file):
+    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--min-severity", "critical"])
+    assert result.exit_code == 0
+
+
+def test_techniques_list():
+    result = runner.invoke(app, ["techniques"])
+    assert result.exit_code == 0
+    assert "cap_sys_admin" in result.output.lower() or "Escape Techniques" in result.output
+
+
+def test_techniques_filter_category():
+    result = runner.invoke(app, ["techniques", "--category", "capability"])
+    assert result.exit_code == 0
+
+
+def test_techniques_filter_severity():
+    result = runner.invoke(app, ["techniques", "--severity", "critical"])
+    assert result.exit_code == 0
+
+
+def test_techniques_search():
+    result = runner.invoke(app, ["techniques", "--search", "docker"])
+    assert result.exit_code == 0
+
+
+def test_techniques_search_no_results():
+    result = runner.invoke(app, ["techniques", "--search", "zzz_nonexistent_zzz"])
+    assert result.exit_code == 0
+
+
+def test_no_args_shows_help():
+    result = runner.invoke(app, [])
+    # Typer no_args_is_help exits with code 0 or 2 depending on version
+    assert result.exit_code in (0, 2)
+    assert "analyze" in result.output.lower() or "usage" in result.output.lower()
