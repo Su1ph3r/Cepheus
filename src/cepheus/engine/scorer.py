@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from cepheus.config import CepheusConfig
 from cepheus.models.chain import EscapeChain
+from cepheus.models.posture import ContainerPosture
 
 
-def score_chain(chain: EscapeChain, config: CepheusConfig | None = None) -> EscapeChain:
+def score_chain(chain: EscapeChain, config: CepheusConfig | None = None, posture: ContainerPosture | None = None) -> EscapeChain:
     """Compute the weighted composite score for an escape chain.
 
     Formula:
@@ -32,15 +33,20 @@ def score_chain(chain: EscapeChain, config: CepheusConfig | None = None) -> Esca
     length_penalty = 1.0 / (1.0 + config.chain_length_penalty * max(0, chain_length - 1))
 
     chain.composite_score = round(raw_score * length_penalty, 4)
+
+    # Apply sandbox mitigation factor
+    if posture is not None and posture.runtime.sandbox_runtime:
+        chain.composite_score = round(chain.composite_score * 0.3, 4)
+
     return chain
 
 
-def rank_chains(chains: list[EscapeChain], config: CepheusConfig | None = None) -> list[EscapeChain]:
+def rank_chains(chains: list[EscapeChain], config: CepheusConfig | None = None, posture: ContainerPosture | None = None) -> list[EscapeChain]:
     """Score and rank chains by composite_score descending."""
     if config is None:
         config = CepheusConfig()
 
     for chain in chains:
-        score_chain(chain, config)
+        score_chain(chain, config, posture)
 
     return sorted(chains, key=lambda c: c.composite_score, reverse=True)

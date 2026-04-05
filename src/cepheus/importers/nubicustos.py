@@ -19,7 +19,7 @@ def load_nubicustos_containers(path: Path) -> list[dict[str, Any]]:
     Raises:
         ValueError: If the file is not a valid Nubicustos export.
     """
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
 
     if data.get("export_source") != "nubicustos":
         raise ValueError(

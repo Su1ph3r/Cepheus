@@ -13,16 +13,14 @@ from cepheus.models.posture import (
 
 
 def test_diff_identical_postures():
-    """Diffing identical postures should show no changes and not claim improvement."""
+    """Diffing identical postures should show no changes and not be marked as regressed."""
     from cepheus.engine.differ import diff_postures
 
     posture = ContainerPosture(hostname="test")
     result = diff_postures(posture, posture)
     assert result.posture_deltas == []
-    # Identical postures — no actual improvement occurred
-    assert result.improved is (
-        result.before_summary.total_chains == 0 and result.after_summary.total_chains == 0
-    )
+    # Identical postures — nothing regressed, so improved should be True
+    assert result.improved is True
 
 
 def test_diff_remediated_techniques():

@@ -63,6 +63,13 @@ def test_parse_kernel_version():
     assert _parse_kernel_version("invalid") == (0, 0, 0)
 
 
+def test_parse_kernel_version_two_part():
+    """Two-part kernel versions like '6.1' should parse as (6, 1, 0)."""
+    assert _parse_kernel_version("6.1") == (6, 1, 0)
+    assert _parse_kernel_version("5.15") == (5, 15, 0)
+    assert _parse_kernel_version("6.1-rc1") == (6, 1, 0)
+
+
 # --- evaluate_prerequisite tests ---
 
 
@@ -298,6 +305,64 @@ def test_version_lte_missing():
     p = ContainerPosture(runtime=RuntimeInfo(runc_version=None))
     prereq = Prerequisite(check_field="runtime.runc_version", check_type="version_lte", check_value="1.1.12")
     assert evaluate_prerequisite(p, prereq) == 0.3
+
+
+def test_any_of_check_passes():
+    """any_of returns confidence_if_met when list contains at least one match."""
+    posture = ContainerPosture(
+        capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN", "CAP_NET_RAW"])
+    )
+    prereq = Prerequisite(
+        check_field="capabilities.effective",
+        check_type="any_of",
+        check_value=["CAP_SYS_ADMIN", "CAP_BPF"],
+        confidence_if_met=1.0,
+        confidence_if_absent=0.0,
+    )
+    assert evaluate_prerequisite(posture, prereq) == 1.0
+
+
+def test_any_of_check_fails():
+    """any_of returns 0.0 when list contains none of the values."""
+    posture = ContainerPosture(
+        capabilities=CapabilityInfo(effective=["CAP_NET_RAW"])
+    )
+    prereq = Prerequisite(
+        check_field="capabilities.effective",
+        check_type="any_of",
+        check_value=["CAP_SYS_ADMIN", "CAP_BPF"],
+        confidence_if_met=1.0,
+        confidence_if_absent=0.0,
+    )
+    assert evaluate_prerequisite(posture, prereq) == 0.0
+
+
+def test_any_of_non_list_field():
+    """any_of returns 0.0 when field is not a list."""
+    posture = ContainerPosture(hostname="test")
+    prereq = Prerequisite(
+        check_field="hostname",
+        check_type="any_of",
+        check_value=["test", "other"],
+        confidence_if_met=1.0,
+        confidence_if_absent=0.0,
+    )
+    assert evaluate_prerequisite(posture, prereq) == 0.0
+
+
+def test_any_of_string_check_value():
+    """any_of with non-list check_value returns 0.0 instead of iterating characters."""
+    posture = ContainerPosture(
+        capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN"])
+    )
+    prereq = Prerequisite(
+        check_field="capabilities.effective",
+        check_type="any_of",
+        check_value="CAP_SYS_ADMIN",  # string, not list — should not iterate chars
+        confidence_if_met=1.0,
+        confidence_if_absent=0.0,
+    )
+    assert evaluate_prerequisite(posture, prereq) == 0.0
 
 
 def test_match_technique_no_prerequisites():

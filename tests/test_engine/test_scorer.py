@@ -78,3 +78,32 @@ def test_score_zero_scores():
     chain = _chain(reliability=0.0, stealth=0.0, confidence=0.0)
     scored = score_chain(chain)
     assert scored.composite_score == 0.0
+
+
+def test_sandbox_reduces_score():
+    """Sandbox runtime detection should reduce composite scores."""
+    from cepheus.models.posture import ContainerPosture, RuntimeInfo
+
+    chain = _chain(reliability=0.8, stealth=0.6, confidence=0.9)
+    posture = ContainerPosture(runtime=RuntimeInfo(sandbox_runtime="gvisor"))
+    score_chain(chain, posture=posture)
+
+    chain_no_sandbox = _chain(reliability=0.8, stealth=0.6, confidence=0.9)
+    score_chain(chain_no_sandbox)
+
+    assert chain.composite_score < chain_no_sandbox.composite_score
+    assert abs(chain.composite_score - chain_no_sandbox.composite_score * 0.3) < 0.001
+
+
+def test_no_sandbox_no_change():
+    """Without sandbox runtime, scoring is unchanged."""
+    from cepheus.models.posture import ContainerPosture
+
+    chain_with = _chain(reliability=0.8, stealth=0.6, confidence=0.9)
+    chain_without = _chain(reliability=0.8, stealth=0.6, confidence=0.9)
+    posture = ContainerPosture()  # sandbox_runtime defaults to None
+
+    score_chain(chain_with, posture=posture)
+    score_chain(chain_without)
+
+    assert chain_with.composite_score == chain_without.composite_score

@@ -4,6 +4,7 @@ from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,
     CredentialInfo,
+    GpuInfo,
     KernelInfo,
     MountInfo,
     NamespaceInfo,
@@ -126,3 +127,41 @@ def test_container_posture_from_dict():
     p = ContainerPosture.model_validate(data)
     assert p.hostname == "from-dict"
     assert "CAP_NET_RAW" in p.capabilities.effective
+
+
+def test_gpu_info_defaults():
+    """GpuInfo has correct defaults."""
+    gpu = GpuInfo()
+    assert gpu.nvidia_devices == []
+    assert gpu.nvidia_toolkit_version is None
+    assert gpu.nvidia_driver_version is None
+
+
+def test_gpu_info_populated():
+    """GpuInfo accepts populated values."""
+    gpu = GpuInfo(
+        nvidia_devices=["/dev/nvidia0", "/dev/nvidiactl"],
+        nvidia_toolkit_version="1.17.7",
+        nvidia_driver_version="550.90.07",
+    )
+    assert len(gpu.nvidia_devices) == 2
+    assert gpu.nvidia_toolkit_version == "1.17.7"
+
+
+def test_sandbox_runtime_default():
+    """RuntimeInfo sandbox_runtime defaults to None."""
+    rt = RuntimeInfo()
+    assert rt.sandbox_runtime is None
+
+
+def test_sandbox_runtime_populated():
+    """RuntimeInfo accepts sandbox_runtime."""
+    rt = RuntimeInfo(sandbox_runtime="gvisor")
+    assert rt.sandbox_runtime == "gvisor"
+
+
+def test_posture_gpu_field():
+    """ContainerPosture has gpu field with defaults."""
+    posture = ContainerPosture()
+    assert posture.gpu.nvidia_devices == []
+    assert posture.gpu.nvidia_toolkit_version is None

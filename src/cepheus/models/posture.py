@@ -63,6 +63,14 @@ class RuntimeInfo(BaseModel):
     privileged: bool = False
     pid_one: str = "unknown"
     runc_version: str | None = None
+    sandbox_runtime: str | None = None
+
+
+class GpuInfo(BaseModel):
+    """GPU device information for escape assessment."""
+    nvidia_devices: list[str] = Field(default_factory=list)
+    nvidia_toolkit_version: str | None = None
+    nvidia_driver_version: str | None = None
 
 
 class KubernetesInfo(BaseModel):
@@ -88,6 +96,7 @@ class ContainerPosture(BaseModel):
     network: NetworkInfo = Field(default_factory=NetworkInfo)
     credentials: CredentialInfo = Field(default_factory=CredentialInfo)
     runtime: RuntimeInfo = Field(default_factory=RuntimeInfo)
+    gpu: GpuInfo = Field(default_factory=GpuInfo)
     kubernetes: KubernetesInfo = Field(default_factory=KubernetesInfo)
     cgroup_version: int = 1
     writable_paths: list[str] = Field(default_factory=list)

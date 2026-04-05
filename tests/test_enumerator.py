@@ -98,8 +98,8 @@ def test_all_top_level_keys_present(enumerator_json):
     expected = {
         "enumeration_version", "timestamp", "hostname", "kernel",
         "capabilities", "mounts", "namespaces", "security",
-        "network", "credentials", "runtime", "kubernetes", "cgroup_version",
-        "writable_paths", "available_tools",
+        "network", "credentials", "runtime", "gpu", "kubernetes",
+        "cgroup_version", "writable_paths", "available_tools",
     }
     assert expected == set(enumerator_json.keys()), (
         f"Missing: {expected - set(enumerator_json.keys())}, "

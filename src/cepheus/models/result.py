@@ -26,5 +26,6 @@ class AnalysisResult(BaseModel):
     techniques_matched: int = 0
     remediations: list[RemediationItem] = Field(default_factory=list)
     llm_analysis: str | None = None
+    executive_summary: str | None = None
     cloud_context: dict[str, Any] | None = None
     analysis_timestamp: str = ""

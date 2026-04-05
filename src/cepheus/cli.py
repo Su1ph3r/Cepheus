@@ -57,7 +57,7 @@ def _load_posture(posture_file: Path):
         raise typer.Exit(1)
 
     try:
-        data = json.loads(posture_file.read_text())
+        data = json.loads(posture_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         console.print(f"[red]Error: Invalid JSON: {e}[/red]")
         raise typer.Exit(1)
@@ -79,6 +79,7 @@ def analyze(
     llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
     from_nubicustos: Path | None = typer.Option(None, "--from-nubicustos", help="Nubicustos container export for cloud context enrichment"),
+    executive_summary: bool = typer.Option(False, "--executive-summary", help="Generate LLM executive summary (requires --llm)"),
 ) -> None:
     """Analyze a container posture JSON file and identify escape paths."""
     posture = _load_posture(posture_file)
@@ -111,6 +112,7 @@ def analyze(
         result.cloud_context = cloud_context
 
     # LLM enrichment
+    client = None
     if llm:
         try:
             from cepheus.llm.client import LLMClient
@@ -119,10 +121,21 @@ def analyze(
             result.llm_analysis = client.analyze_posture_sync(posture, result.chains)
         except ImportError:
             console.print("[yellow]Warning: LLM extra not installed. Run: pip install cepheus[llm][/yellow]")
-        except Exception:
-            console.print("[yellow]Warning: LLM analysis failed[/yellow]")
+        except Exception as exc:
+            console.print(f"[yellow]Warning: LLM analysis failed: {exc}[/yellow]")
 
-    # Filter by severity
+    if executive_summary:
+        if not llm:
+            console.print("[yellow]Warning: --executive-summary requires --llm flag[/yellow]")
+        elif client is not None:
+            try:
+                result.executive_summary = client.summarize_sync(result)
+            except Exception as exc:
+                console.print(f"[yellow]Warning: Executive summary generation failed: {exc}[/yellow]")
+
+    # NOTE: Severity filtering is intentionally applied AFTER LLM enrichment.
+    # The LLM sees all chains for comprehensive analysis, but the displayed
+    # output respects the user's --min-severity filter.
     min_rank = SEVERITY_RANK[min_severity.value]
     result.chains = [c for c in result.chains if SEVERITY_RANK.get(c.severity.value, 0) >= min_rank]
     result.remediations = [r for r in result.remediations if SEVERITY_RANK.get(r.severity.value, 0) >= min_rank]
@@ -185,7 +198,7 @@ def diff(
     if format == DiffFormat.json:
         report = diff_result.model_dump(mode="json")
         if output:
-            Path(output).write_text(json.dumps(report, indent=2))
+            Path(output).write_text(json.dumps(report, indent=2), encoding="utf-8")
             console.print(f"[green]Diff report written to {output}[/green]")
         else:
             console.print_json(json.dumps(report))
@@ -230,7 +243,10 @@ def enumerate(
         )
         posture_json = result.stdout
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error running enumerator: {e.stderr}[/red]")
+        stderr_text = ""
+        if e.stderr:
+            stderr_text = e.stderr.decode("utf-8", errors="replace") if isinstance(e.stderr, bytes) else str(e.stderr)
+        console.print(f"[red]Error running enumerator: {stderr_text}[/red]")
         raise typer.Exit(1)
     except FileNotFoundError:
         console.print(f"[red]Error: '{rt}' not found in PATH[/red]")
@@ -245,7 +261,7 @@ def enumerate(
         raise typer.Exit(1)
 
     if output:
-        output.write_text(posture_json)
+        output.write_text(posture_json, encoding="utf-8")
         console.print(f"[green]Posture saved to {output}[/green]")
     else:
         console.print(posture_json)

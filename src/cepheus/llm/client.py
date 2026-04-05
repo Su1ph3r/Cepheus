@@ -56,8 +56,8 @@ class LLMClient:
             )
             return response.choices[0].message.content
         except Exception as exc:
-            logger.error("LLM analysis failed: %s", type(exc).__name__)
-            return "[LLM analysis unavailable]"
+            logger.error("LLM analysis failed: %s: %s", type(exc).__name__, exc)
+            return f"[LLM analysis unavailable: {type(exc).__name__}: {exc}]"
 
     def analyze_posture_sync(
         self,
@@ -65,7 +65,16 @@ class LLMClient:
         chains: list[EscapeChain],
     ) -> str:
         """Synchronous wrapper for analyze_posture."""
-        return asyncio.run(self.analyze_posture(posture, chains))
+        try:
+            asyncio.get_running_loop()
+            # Already in an event loop — run in a thread to avoid RuntimeError
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.analyze_posture(posture, chains))
+                return future.result()
+        except RuntimeError:
+            # No running event loop — safe to use asyncio.run directly
+            return asyncio.run(self.analyze_posture(posture, chains))
 
     async def summarize(self, result: AnalysisResult) -> str:
         """Generate an executive summary of the full analysis result."""
@@ -88,9 +97,16 @@ class LLMClient:
             )
             return response.choices[0].message.content
         except Exception as exc:
-            logger.error("LLM summary failed: %s", type(exc).__name__)
-            return "[LLM summary unavailable]"
+            logger.error("LLM summary failed: %s: %s", type(exc).__name__, exc)
+            return f"[LLM summary unavailable: {type(exc).__name__}: {exc}]"
 
     def summarize_sync(self, result: AnalysisResult) -> str:
         """Synchronous wrapper for summarize."""
-        return asyncio.run(self.summarize(result))
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.summarize(result))
+                return future.result()
+        except RuntimeError:
+            return asyncio.run(self.summarize(result))

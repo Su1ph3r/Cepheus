@@ -5,8 +5,8 @@ from cepheus.engine.poc_templates import POC_TEMPLATES
 
 
 def test_technique_count():
-    """Database should have exactly 56 techniques."""
-    assert len(get_all_techniques()) == 56
+    """Database should have exactly 65 techniques."""
+    assert len(get_all_techniques()) == 65
 
 
 def test_no_duplicate_ids():
@@ -16,7 +16,7 @@ def test_no_duplicate_ids():
 
 
 def test_new_techniques_exist():
-    """All v0.2.0 techniques must be present."""
+    """All v0.2.0 and v0.3.0 techniques must be present."""
     new_ids = [
         "systemd_cgroup_injection",
         "tmpfs_shm_cross_container",
@@ -30,6 +30,15 @@ def test_new_techniques_exist():
         "proc_fd_symlink_traversal",
         "device_mapper_access",
         "vm_param_manipulation",
+        "cve_2025_31133",
+        "cve_2025_52565",
+        "cve_2025_52881",
+        "cve_2024_23651",
+        "cve_2024_23652",
+        "cve_2025_23266",
+        "cve_2024_0132",
+        "cve_2025_1974",
+        "cve_2025_9074",
     ]
     for tid in new_ids:
         assert get_technique_by_id(tid) is not None, f"Technique {tid} not found"

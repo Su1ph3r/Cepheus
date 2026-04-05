@@ -60,6 +60,7 @@ def build_single_chains(
 def build_combinatorial_chains(
     matched_techniques: list[tuple[EscapeTechnique, float, str]],
     posture: ContainerPosture,
+    max_chain_length: int = 3,
 ) -> list[EscapeChain]:
     """Build multi-step chains from combinatorial techniques.
 
@@ -121,6 +122,9 @@ def build_combinatorial_chains(
                 continue
             chains.append(_build_two_step_chain(tech_a, conf_a, poc_a, tech_b, conf_b, poc_b))
 
+    # Enforce max chain length
+    chains = [c for c in chains if len(c.steps) <= max_chain_length]
+
     return chains
 
 
@@ -172,5 +176,18 @@ def _is_useful_pairing(info_tech: EscapeTechnique, esc_tech: EscapeTechnique) ->
         # containerd/crio socket + K8s service account
         ("containerd_sock_mount", "k8s_service_account"),
         ("crio_sock_mount", "k8s_service_account"),
+        # IngressNightmare + K8s access techniques
+        ("cve_2025_1974", "k8s_service_account"),
+        ("cve_2025_1974", "k8s_kubelet_api"),
+        # Cloud metadata → NVIDIA GPU escapes
+        ("cloud_metadata_creds", "cve_2025_23266"),
+        ("cloud_metadata_creds", "cve_2024_0132"),
+        # runc CVEs benefit from LSM being unconfined
+        ("lsm_apparmor_unconfined", "cve_2025_31133"),
+        ("lsm_apparmor_unconfined", "cve_2025_52565"),
+        ("lsm_apparmor_unconfined", "cve_2025_52881"),
+        ("lsm_selinux_unconfined", "cve_2025_31133"),
+        ("lsm_selinux_unconfined", "cve_2025_52565"),
+        ("lsm_selinux_unconfined", "cve_2025_52881"),
     }
     return (info_tech.id, esc_tech.id) in useful_pairs

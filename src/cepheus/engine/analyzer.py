@@ -25,7 +25,7 @@ def _render_poc(technique_id: str, posture: ContainerPosture) -> str:
             "runtime": posture.runtime.runtime,
         }
         return render_poc(technique_id, posture_data)
-    except (ImportError, KeyError):
+    except ImportError:
         return f"# No PoC template for {technique_id}"
 
 
@@ -100,7 +100,7 @@ def analyze(
 
     # Build chains
     single_chains: list[EscapeChain] = build_single_chains(matched)
-    combo_chains: list[EscapeChain] = build_combinatorial_chains(matched, posture)
+    combo_chains: list[EscapeChain] = build_combinatorial_chains(matched, posture, config.max_chain_length)
 
     # Merge and deduplicate by chain ID
     all_chains_map: dict[str, EscapeChain] = {}
@@ -111,7 +111,7 @@ def analyze(
     all_chains = list(all_chains_map.values())
 
     # Score and rank
-    ranked_chains = rank_chains(all_chains, config)
+    ranked_chains = rank_chains(all_chains, config, posture)
 
     # Remediations
     remediations = _generate_remediations(matched_for_remediation)

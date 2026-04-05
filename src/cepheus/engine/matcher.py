@@ -45,10 +45,10 @@ def resolve_dot_path(obj: Any, path: str) -> Any:
 
 def _parse_kernel_version(version_str: str) -> tuple[int, int, int]:
     """Parse a kernel version string into (major, minor, patch)."""
-    match = re.match(r"(\d+)\.(\d+)\.(\d+)", version_str)
+    match = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", version_str)
     if not match:
         return (0, 0, 0)
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
 
 
 def _kernel_tuple(posture: ContainerPosture) -> tuple[int, int, int]:
@@ -78,6 +78,11 @@ def evaluate_prerequisite(posture: ContainerPosture, prereq: Prerequisite) -> fl
             return prereq.confidence_if_met if prereq.check_value in value else 0.0
         if isinstance(value, str):
             return prereq.confidence_if_met if prereq.check_value in value else 0.0
+        return 0.0
+
+    if check == "any_of":
+        if isinstance(value, list) and isinstance(prereq.check_value, list):
+            return prereq.confidence_if_met if any(v in value for v in prereq.check_value) else 0.0
         return 0.0
 
     if check == "equals":

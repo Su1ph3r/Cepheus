@@ -36,9 +36,7 @@ def _status_text(status: str) -> Text:
 
 def print_diff_result(diff: DiffResult, output_console: Console | None = None) -> None:
     """Print the posture diff result using Rich formatting."""
-    global console
-    if output_console is not None:
-        console = output_console
+    c = output_console if output_console is not None else console
     # Summary panel
     verdict = Text("IMPROVED", style="bold green") if diff.improved else Text("REGRESSED", style="bold red")
 
@@ -55,7 +53,7 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
     summary_text.append("\n\n  Verdict: ")
     summary_text.append(verdict)
 
-    console.print(Panel(summary_text, title="[bold]Posture Diff Summary[/bold]", border_style="cyan"))
+    c.print(Panel(summary_text, title="[bold]Posture Diff Summary[/bold]", border_style="cyan"))
 
     # Posture changes table
     if diff.posture_deltas:
@@ -71,7 +69,7 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
                 str(delta.after_value) if delta.after_value is not None else "",
             )
 
-        console.print(posture_table)
+        c.print(posture_table)
 
     # Technique deltas table
     if diff.technique_deltas:
@@ -89,7 +87,7 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
                 _severity_text(td.severity.value),
             )
 
-        console.print(tech_table)
+        c.print(tech_table)
 
     # Chain deltas table
     if diff.chain_deltas:
@@ -111,8 +109,8 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
                 f"{cd.score_after:.4f}" if cd.score_after is not None else "-",
             )
 
-        console.print(chain_table)
+        c.print(chain_table)
 
     # No changes at all
     if not diff.posture_deltas and not diff.technique_deltas and not diff.chain_deltas:
-        console.print("[green]No changes detected.[/green]")
+        c.print("[green]No changes detected.[/green]")

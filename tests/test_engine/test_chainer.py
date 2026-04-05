@@ -72,3 +72,65 @@ def test_build_combinatorial_no_useful_pair():
     # No useful pairing between env_secret_leak and cap_sys_admin_mount
     multi_step = [c for c in chains if len(c.steps) == 2]
     assert len(multi_step) == 0
+
+
+def test_max_chain_length_filters():
+    """Chains exceeding max_chain_length are filtered out."""
+    tech_info = EscapeTechnique(
+        id="cloud_metadata_creds",
+        name="Cloud Metadata Credentials",
+        category=TechniqueCategory.INFO_DISCLOSURE,
+        severity=Severity.HIGH,
+        description="test",
+    )
+    tech_esc = EscapeTechnique(
+        id="k8s_service_account",
+        name="K8s SA Token",
+        category=TechniqueCategory.RUNTIME,
+        severity=Severity.HIGH,
+        description="test",
+    )
+    matched = [
+        (tech_info, 0.9, "# info poc"),
+        (tech_esc, 0.8, "# esc poc"),
+    ]
+    posture = ContainerPosture()
+
+    # With max_chain_length=2, two-step chains are allowed
+    chains_2 = build_combinatorial_chains(matched, posture, max_chain_length=2)
+    two_step = [c for c in chains_2 if len(c.steps) == 2]
+
+    # With max_chain_length=1, two-step chains are filtered
+    chains_1 = build_combinatorial_chains(matched, posture, max_chain_length=1)
+    two_step_filtered = [c for c in chains_1 if len(c.steps) == 2]
+    assert len(two_step_filtered) == 0
+
+
+def test_new_cve_pairings():
+    """New CVE techniques should form chains with related techniques."""
+    from cepheus.models.technique import EscapeTechnique, TechniqueCategory, Severity
+    from cepheus.models.posture import ContainerPosture
+
+    # IngressNightmare + K8s service account should pair
+    ingress = EscapeTechnique(
+        id="cve_2025_1974",
+        name="IngressNightmare",
+        category=TechniqueCategory.RUNTIME,
+        severity=Severity.CRITICAL,
+        description="test",
+    )
+    k8s_sa = EscapeTechnique(
+        id="k8s_service_account",
+        name="K8s SA Token",
+        category=TechniqueCategory.RUNTIME,
+        severity=Severity.HIGH,
+        description="test",
+    )
+    matched = [
+        (ingress, 0.9, "# ingress poc"),
+        (k8s_sa, 0.8, "# sa poc"),
+    ]
+    posture = ContainerPosture()
+    chains = build_combinatorial_chains(matched, posture)
+    two_step = [c for c in chains if len(c.steps) == 2]
+    assert len(two_step) > 0, "IngressNightmare + K8s SA should form a two-step chain"

@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-170%20passing-brightgreen.svg)](#testing)
 
 ---
 
@@ -14,7 +14,7 @@ Cepheus is a two-component container security tool that answers one question: **
 
 1. **Enumerator** — a zero-dependency POSIX shell script that runs inside any container and dumps its full security posture to JSON (capabilities, mounts, kernel version, seccomp, AppArmor, namespaces, cgroups, credentials, network config, Kubernetes metadata, runtime versions, writable paths, and available tools).
 
-2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **56 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance.
+2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **65 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance. Includes GPU/NVIDIA device detection, sandbox runtime detection (gVisor, Firecracker, Kata), and executive summary generation.
 
 Named after the constellation Cepheus — the king who watches over the heavens — it watches over container boundaries.
 
@@ -23,11 +23,11 @@ Named after the constellation Cepheus — the king who watches over the heavens 
 | Feature | deepce | CDK | amicontained | BOtB | Cepheus |
 |---|:---:|:---:|:---:|:---:|:---:|
 | Capability enumeration | Partial | Yes | Yes | Partial | **Full** |
-| Kernel CVE correlation | - | - | - | - | **12 CVEs** |
+| Kernel CVE correlation | - | - | - | - | **21 CVEs** |
 | Runtime version detection | - | Partial | - | - | **Yes** |
 | Combinatorial chain analysis | - | - | - | - | **21 combos** |
 | Escape path scoring | - | - | - | - | **Weighted** |
-| PoC generation | - | Some | - | Some | **All 56** |
+| PoC generation | - | Some | - | Some | **All 65** |
 | Defense enumeration | - | - | Partial | - | **Full** |
 | 2024-2025 CVEs | - | - | - | - | **Yes** |
 | Stealth scoring | - | - | - | - | **Yes** |
@@ -98,7 +98,7 @@ cepheus diff before.json after.json --format json -o delta.json
 ### Browse Techniques
 
 ```bash
-# List all 56 techniques
+# List all 65 techniques
 cepheus techniques
 
 # Filter by category
@@ -112,7 +112,7 @@ cepheus techniques --severity critical
 
 ## Technique Coverage
 
-Cepheus covers **56 escape techniques** across 6 categories:
+Cepheus covers **65 escape techniques** across 6 categories:
 
 ### Capability-Based (9)
 Escapes leveraging Linux capabilities: `CAP_SYS_ADMIN` mount/cgroup/BPF attacks, `CAP_SYS_PTRACE` process injection, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` for bypassing file permissions, `CAP_NET_ADMIN` network namespace manipulation, `CAP_SYS_RAWIO` raw device I/O, and eBPF `bpf_probe_write_user` kernel memory manipulation.
@@ -120,7 +120,7 @@ Escapes leveraging Linux capabilities: `CAP_SYS_ADMIN` mount/cgroup/BPF attacks,
 ### Mount-Based (15)
 Docker socket mounts, containerd and CRI-O socket mounts, `/proc/sys/kernel/core_pattern` writes, `/proc/sysrq-trigger` abuse, sysfs exploitation, writable host path mounts (`/etc`, `/`), cgroup filesystem escapes, `/dev` device access, systemd cgroup v1 injection, shared `/dev/shm` cross-container data exfiltration, `/proc/self/fd` symlink traversal, device-mapper direct access, and `/proc/sys/vm` parameter manipulation.
 
-### Kernel CVE-Based (12)
+### Kernel CVE-Based (17)
 - **CVE-2022-0185** — FSConfig heap overflow (5.1–5.16.2)
 - **CVE-2022-0847** — DirtyPipe (5.8–5.16.11)
 - **CVE-2021-22555** — Netfilter heap OOB write (2.6.19–5.12)
@@ -133,9 +133,14 @@ Docker socket mounts, containerd and CRI-O socket mounts, `/proc/sys/kernel/core
 - **CVE-2024-21626** — runc process.cwd container breakout
 - **CVE-2024-53104** — USB Video Class OOB write
 - **CVE-2025-21756** — vsock use-after-free
+- **CVE-2024-23651** — BuildKit mount cache race condition
+- **CVE-2024-23652** — BuildKit arbitrary host file deletion
+- **CVE-2024-23653** — BuildKit privilege check bypass
+- **CVE-2024-24557** — runc image build cache poisoning
+- **CVE-2024-23650** — BuildKit daemon crash via malicious gRPC
 
-### Runtime / Orchestrator (10)
-Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, kubelet node proxy, AppArmor unconfined profile detection, and SELinux disabled/unconfined detection.
+### Runtime / Orchestrator (14)
+Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, kubelet node proxy, AppArmor unconfined profile detection, SELinux disabled/unconfined detection, NVIDIA Container Toolkit device access (CVE-2024-0132), NVIDIA device mount escape (CVE-2024-0133), IngressNightmare unauthenticated RCE (CVE-2025-1974), and Docker Desktop file sharing escape (CVE-2025-3224).
 
 ### Combinatorial (6)
 Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`. The chainer also builds dynamic two-step chains like LSM unconfined + capability escalation and shared memory + ptrace injection.
@@ -162,7 +167,7 @@ Chains are ranked highest-score-first. Missing posture data uses a configurable 
 
 ## Enumerator
 
-The enumerator is a **784-line POSIX shell script** with zero external dependencies. It runs anywhere:
+The enumerator is a **834-line POSIX shell script** with zero external dependencies. It runs anywhere:
 
 | Environment | Shell | Status |
 |---|---|---|
@@ -201,6 +206,7 @@ export CEPHEUS_WEIGHT_RELIABILITY=0.40
 export CEPHEUS_WEIGHT_STEALTH=0.25
 export CEPHEUS_WEIGHT_CONFIDENCE=0.35
 export CEPHEUS_CHAIN_LENGTH_PENALTY=0.15   # Per-step penalty
+export CEPHEUS_SANDBOX_MITIGATION_FACTOR=0.6  # Score reduction for sandbox runtimes
 
 # LLM enrichment (optional)
 export CEPHEUS_LLM_MODEL=anthropic/claude-sonnet-4-20250514
@@ -249,7 +255,7 @@ cepheus analyze posture.json --llm
 
 ```bash
 pip install -e ".[dev]"
-pytest                                     # 144 tests
+pytest                                     # 170 tests
 pytest --cov=cepheus --cov-report=term     # with coverage
 ```
 

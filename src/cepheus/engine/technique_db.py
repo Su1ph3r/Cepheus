@@ -1,4 +1,4 @@
-"""Complete database of 56 container escape techniques."""
+"""Complete database of 65 container escape techniques."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ _TECHNIQUES: list[EscapeTechnique] | None = None
 
 
 def _build_techniques() -> list[EscapeTechnique]:
-    """Build and return all 56 escape techniques."""
+    """Build and return all 65 escape techniques."""
     return [
         # ── CAPABILITY (9) ───────────────────────────────────────────
         EscapeTechnique(
@@ -253,16 +253,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             prerequisites=[
                 Prerequisite(
                     check_field="capabilities.effective",
-                    check_type="contains",
-                    check_value="CAP_SYS_ADMIN",
-                    description="Requires CAP_SYS_ADMIN (or CAP_BPF)",
-                    confidence_if_absent=0.0,
-                ),
-                Prerequisite(
-                    check_field="capabilities.effective",
-                    check_type="contains",
-                    check_value="CAP_BPF",
-                    description="Requires CAP_BPF (or CAP_SYS_ADMIN)",
+                    check_type="any_of",
+                    check_value=["CAP_SYS_ADMIN", "CAP_BPF"],
+                    description="Requires CAP_SYS_ADMIN or CAP_BPF",
                     confidence_if_absent=0.0,
                 ),
                 Prerequisite(
@@ -697,7 +690,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.4,
             remediation="Mount /proc read-only or use seccomp",
         ),
-        # ── KERNEL (12) ──────────────────────────────────────────────
+        # ── KERNEL (17) ──────────────────────────────────────────────
         EscapeTechnique(
             id="cve_2022_0185",
             name="FSConfig heap overflow",
@@ -902,16 +895,9 @@ def _build_techniques() -> list[EscapeTechnique]:
                 ),
                 Prerequisite(
                     check_field="capabilities.effective",
-                    check_type="contains",
-                    check_value="CAP_SYS_ADMIN",
-                    description="Requires CAP_SYS_ADMIN (or CAP_BPF)",
-                    confidence_if_absent=0.0,
-                ),
-                Prerequisite(
-                    check_field="capabilities.effective",
-                    check_type="contains",
-                    check_value="CAP_BPF",
-                    description="Requires CAP_BPF (or CAP_SYS_ADMIN)",
+                    check_type="any_of",
+                    check_value=["CAP_SYS_ADMIN", "CAP_BPF"],
+                    description="Requires CAP_SYS_ADMIN or CAP_BPF",
                     confidence_if_absent=0.0,
                 ),
             ],
@@ -1050,7 +1036,135 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.4,
             remediation="Update kernel to >= 6.14.1",
         ),
-        # ── RUNTIME (10) ─────────────────────────────────────────────
+        EscapeTechnique(
+            id="cve_2025_31133",
+            name="runc Masked Path Race (CVE-2025-31133)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.HIGH,
+            description=(
+                "Race condition in runc's masked path handling allows replacing /dev/null "
+                "with a symlink during container init, causing runc to bind-mount an "
+                "attacker-controlled target read-write, enabling writes to /proc and full escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runc_version",
+                    check_type="version_lte",
+                    check_value="1.2.7",
+                    description="runc <= 1.2.7 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-31133"],
+            cve="CVE-2025-31133",
+            reliability=0.6,
+            stealth=0.3,
+            remediation="Upgrade runc to >= 1.2.8 or >= 1.3.3 or >= 1.4.0-rc3.",
+        ),
+        EscapeTechnique(
+            id="cve_2025_52565",
+            name="runc /dev/console Race (CVE-2025-52565)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.HIGH,
+            description=(
+                "Race condition in runc's /dev/console bind mount allows redirection via "
+                "symlink so runc mounts an unexpected target before protections are applied, "
+                "exposing writable procfs access."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runc_version",
+                    check_type="version_lte",
+                    check_value="1.2.7",
+                    description="runc <= 1.2.7 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-52565"],
+            cve="CVE-2025-52565",
+            reliability=0.5,
+            stealth=0.3,
+            remediation="Upgrade runc to >= 1.2.8 or >= 1.3.3 or >= 1.4.0-rc3.",
+        ),
+        EscapeTechnique(
+            id="cve_2025_52881",
+            name="runc procfs Write Redirect (CVE-2025-52881)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.HIGH,
+            description=(
+                "runc can be tricked into performing writes to /proc that are redirected "
+                "to attacker-controlled targets, bypassing LSM relabel protections. Turns "
+                "ordinary runc writes into arbitrary writes to files like /proc/sysrq-trigger."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runc_version",
+                    check_type="version_lte",
+                    check_value="1.2.7",
+                    description="runc <= 1.2.7 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-52881"],
+            cve="CVE-2025-52881",
+            reliability=0.6,
+            stealth=0.4,
+            remediation="Upgrade runc to >= 1.2.8 or >= 1.3.3 or >= 1.4.0-rc3.",
+        ),
+        EscapeTechnique(
+            id="cve_2024_23651",
+            name="BuildKit Cache Race (CVE-2024-23651)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.CRITICAL,
+            description=(
+                "TOCTOU race condition in BuildKit when mounting cache volumes at build time "
+                "allows escalation from disk access to full host root command execution."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runtime",
+                    check_type="regex",
+                    check_value="docker|containerd",
+                    description="Requires Docker or containerd runtime",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611", "T1068"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-23651"],
+            cve="CVE-2024-23651",
+            reliability=0.5,
+            stealth=0.3,
+            remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+        ),
+        EscapeTechnique(
+            id="cve_2024_23652",
+            name="BuildKit Path Traversal (CVE-2024-23652)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.CRITICAL,
+            description=(
+                "Path traversal vulnerability in BuildKit allows deletion of arbitrary files "
+                "on the host during the image building process."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runtime",
+                    check_type="regex",
+                    check_value="docker|containerd",
+                    description="Requires Docker or containerd runtime",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611", "T1565"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-23652"],
+            cve="CVE-2024-23652",
+            reliability=0.6,
+            stealth=0.2,
+            remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+        ),
+        # ── RUNTIME (14) ─────────────────────────────────────────────
         EscapeTechnique(
             id="k8s_service_account",
             name="K8s SA token privilege escalation",
@@ -1322,6 +1436,120 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.65,
             stealth=0.6,
             remediation="Restrict kubelet proxy access via RBAC",
+        ),
+        EscapeTechnique(
+            id="cve_2025_23266",
+            name="NVIDIAScape OCI Hook Escape (CVE-2025-23266)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.CRITICAL,
+            description=(
+                "Container escape via LD_PRELOAD manipulation of NVIDIA Container Toolkit "
+                "OCI hooks. The createContainer hook inherits environment variables from the "
+                "container image, allowing a malicious container to force the privileged "
+                "nvidia-ctk process to load an arbitrary shared library."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="gpu.nvidia_devices",
+                    check_type="not_empty",
+                    check_value=None,
+                    description="NVIDIA GPU devices must be present",
+                ),
+                Prerequisite(
+                    check_field="gpu.nvidia_toolkit_version",
+                    check_type="version_lte",
+                    check_value="1.17.7",
+                    description="NVIDIA Container Toolkit <= 1.17.7 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611", "T1068"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-23266"],
+            cve="CVE-2025-23266",
+            reliability=0.9,
+            stealth=0.4,
+            remediation="Upgrade NVIDIA Container Toolkit to >= 1.17.8 or GPU Operator to >= 25.3.1.",
+        ),
+        EscapeTechnique(
+            id="cve_2024_0132",
+            name="NVIDIA Container Toolkit Escape (CVE-2024-0132)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.CRITICAL,
+            description=(
+                "Vulnerability in NVIDIA Container Toolkit allows a specially crafted "
+                "container image to gain access to the host filesystem, enabling full "
+                "host takeover."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="gpu.nvidia_devices",
+                    check_type="not_empty",
+                    check_value=None,
+                    description="NVIDIA GPU devices must be present",
+                ),
+                Prerequisite(
+                    check_field="gpu.nvidia_toolkit_version",
+                    check_type="version_lte",
+                    check_value="1.16.1",
+                    description="NVIDIA Container Toolkit <= 1.16.1 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-0132"],
+            cve="CVE-2024-0132",
+            reliability=0.8,
+            stealth=0.3,
+            remediation="Upgrade NVIDIA Container Toolkit to >= 1.16.2.",
+        ),
+        EscapeTechnique(
+            id="cve_2025_1974",
+            name="IngressNightmare Admission Webhook RCE (CVE-2025-1974)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.CRITICAL,
+            description=(
+                "Unauthenticated RCE in ingress-nginx admission webhook. Any pod on the "
+                "cluster network can exploit configuration injection to gain access to all "
+                "secrets across all namespaces and achieve full cluster takeover."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.orchestrator",
+                    check_type="equals",
+                    check_value="kubernetes",
+                    description="Must be running in Kubernetes",
+                ),
+            ],
+            mitre_attack=["T1611", "T1190"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-1974"],
+            cve="CVE-2025-1974",
+            reliability=0.7,
+            stealth=0.3,
+            remediation="Upgrade ingress-nginx to >= 1.12.1 or >= 1.11.5. Restrict network access to admission webhook.",
+        ),
+        EscapeTechnique(
+            id="cve_2025_9074",
+            name="Docker Desktop Container Escape (CVE-2025-9074)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.CRITICAL,
+            description=(
+                "Critical container escape in Docker Desktop for Windows and macOS allowing "
+                "containers to escape isolation and compromise the host system."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runtime",
+                    check_type="equals",
+                    check_value="docker",
+                    description="Requires Docker runtime",
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2025-9074"],
+            cve="CVE-2025-9074",
+            reliability=0.6,
+            stealth=0.3,
+            remediation="Upgrade Docker Desktop to the latest patched version.",
         ),
         # ── COMBINATORIAL (6) ────────────────────────────────────────
         EscapeTechnique(
@@ -1620,7 +1848,7 @@ def _build_techniques() -> list[EscapeTechnique]:
 
 
 def get_all_techniques() -> list[EscapeTechnique]:
-    """Return all 56 escape techniques."""
+    """Return all 65 escape techniques."""
     global _TECHNIQUES
     if _TECHNIQUES is None:
         _TECHNIQUES = _build_techniques()

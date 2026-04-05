@@ -12,7 +12,7 @@ def test_generate_report_roundtrip(sample_analysis_result):
     assert isinstance(report, dict)
     json_str = json.dumps(report)
     roundtrip = json.loads(json_str)
-    assert roundtrip["total_techniques_checked"] == 56
+    assert roundtrip["total_techniques_checked"] == 65
     assert "chains" in roundtrip
     assert "remediations" in roundtrip
 
@@ -23,4 +23,4 @@ def test_write_report_creates_file(sample_analysis_result, tmp_path):
     write_report(sample_analysis_result, output_path)
     assert output_path.exists()
     data = json.loads(output_path.read_text())
-    assert data["total_techniques_checked"] == 56
+    assert data["total_techniques_checked"] == 65

@@ -10,7 +10,7 @@ ENUM_VERSION="0.1.0"
 # JSON helpers
 # ---------------------------------------------------------------------------
 
-json_str() { printf '"%s"' "$(echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\t' ' ' | tr '\n' ' ' | tr -d '\r')"; }
 json_int() { printf '%d' "$1"; }
 json_bool() { if [ "$1" = "true" ]; then printf 'true'; else printf 'false'; fi; }
 json_null() { printf 'null'; }
@@ -475,6 +475,16 @@ collect_runtime() {
             PRIVILEGED="true"
         fi
     fi
+
+    # Sandbox runtime detection
+    SANDBOX_RUNTIME=""
+    if grep -qi "gvisor" /proc/version 2>/dev/null; then
+        SANDBOX_RUNTIME="gvisor"
+    elif [ -f /sys/class/dmi/id/product_name ] && grep -qi "firecracker" /sys/class/dmi/id/product_name 2>/dev/null; then
+        SANDBOX_RUNTIME="firecracker"
+    elif [ -d /run/kata-containers ] || [ -f /.kata-containers ]; then
+        SANDBOX_RUNTIME="kata"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -671,6 +681,37 @@ collect_tools() {
 }
 
 # ---------------------------------------------------------------------------
+# GPU detection
+# ---------------------------------------------------------------------------
+
+collect_gpu() {
+    # NVIDIA devices
+    NVIDIA_DEVICES=""
+    for dev in /dev/nvidia*; do
+        [ -e "$dev" ] || continue
+        if [ -z "$NVIDIA_DEVICES" ]; then
+            NVIDIA_DEVICES="\"$dev\""
+        else
+            NVIDIA_DEVICES="$NVIDIA_DEVICES, \"$dev\""
+        fi
+    done
+
+    # NVIDIA toolkit version
+    NVIDIA_TOOLKIT_VERSION=""
+    if command -v nvidia-container-toolkit >/dev/null 2>&1; then
+        NVIDIA_TOOLKIT_VERSION=$(nvidia-container-toolkit --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    fi
+
+    # NVIDIA driver version
+    NVIDIA_DRIVER_VERSION=""
+    if [ -f /proc/driver/nvidia/version ]; then
+        NVIDIA_DRIVER_VERSION=$(head -1 /proc/driver/nvidia/version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+    elif command -v nvidia-smi >/dev/null 2>&1; then
+        NVIDIA_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Main — collect everything and emit JSON
 # ---------------------------------------------------------------------------
 
@@ -689,6 +730,7 @@ main() {
     collect_network
     collect_credentials
     collect_runtime
+    collect_gpu
     detect_cgroup_version
     collect_writable_paths
     collect_kubernetes
@@ -760,7 +802,15 @@ main() {
     printf '    "orchestrator": %s,\n' "$(json_str_or_null "$ORCHESTRATOR")"
     printf '    "privileged": %s,\n' "$(json_bool "$PRIVILEGED")"
     printf '    "pid_one": %s,\n' "$(json_str "$PID_ONE")"
-    printf '    "runc_version": %s\n' "$(json_str_or_null "$RUNC_VERSION")"
+    printf '    "runc_version": %s,\n' "$(json_str_or_null "$RUNC_VERSION")"
+    printf '    "sandbox_runtime": %s\n' "$(json_str_or_null "$SANDBOX_RUNTIME")"
+    printf '  },\n'
+
+    # gpu
+    printf '  "gpu": {\n'
+    printf '    "nvidia_devices": [%s],\n' "$NVIDIA_DEVICES"
+    printf '    "nvidia_toolkit_version": %s,\n' "$(json_str_or_null "$NVIDIA_TOOLKIT_VERSION")"
+    printf '    "nvidia_driver_version": %s\n' "$(json_str_or_null "$NVIDIA_DRIVER_VERSION")"
     printf '  },\n'
 
     # kubernetes

@@ -180,6 +180,37 @@ POC_TEMPLATES: dict[str, str] = {
         "# CVE-2025-21756 — vsock use-after-free\n"
         "/tmp/cve_2025_21756"
     ),
+    "cve_2025_31133": (
+        "# CVE-2025-31133: runc masked path race\n"
+        "# Requires crafting a malicious container image with symlink in /dev/null\n"
+        "# Check runc version: runc --version\n"
+        "ln -sf /proc/sysrq-trigger /dev/null\n"
+        "# Trigger runc to bind-mount over the symlink target"
+    ),
+    "cve_2025_52565": (
+        "# CVE-2025-52565: runc /dev/console race condition\n"
+        "# Requires race condition during container init\n"
+        "# Check runc version: runc --version\n"
+        "# Create symlink race on /dev/console during container startup"
+    ),
+    "cve_2025_52881": (
+        "# CVE-2025-52881: runc procfs write redirect\n"
+        "# Redirect runc's /proc writes to attacker-controlled targets\n"
+        "# Check runc version: runc --version\n"
+        "# Exploit runc's write operations to /proc for arbitrary file writes"
+    ),
+    "cve_2024_23651": (
+        "# CVE-2024-23651: BuildKit cache mount TOCTOU race\n"
+        "# Exploitable during docker build with cache mounts\n"
+        "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
+        "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
+    ),
+    "cve_2024_23652": (
+        "# CVE-2024-23652: BuildKit path traversal - arbitrary file deletion\n"
+        "# Exploitable during docker build process\n"
+        "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
+        "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
+    ),
     "lsm_apparmor_unconfined": (
         "# AppArmor is unconfined — no MAC restrictions\n"
         "cat /proc/self/attr/current  # Should show 'unconfined'"
@@ -204,6 +235,33 @@ POC_TEMPLATES: dict[str, str] = {
     "docker_api_unauth": (
         "curl -s --unix-socket /var/run/docker.sock "
         "http://localhost/images/json"
+    ),
+    "cve_2025_23266": (
+        "# CVE-2025-23266: NVIDIAScape - OCI hook LD_PRELOAD escape\n"
+        "# Build malicious image with LD_PRELOAD in environment\n"
+        "# FROM ubuntu:22.04\n"
+        "# ENV LD_PRELOAD=/tmp/malicious.so\n"
+        "# The nvidia-ctk createContainer hook will load the library as root\n"
+        "cat /proc/self/environ | tr '\\0' '\\n' | grep NVIDIA"
+    ),
+    "cve_2024_0132": (
+        "# CVE-2024-0132: NVIDIA Container Toolkit host filesystem access\n"
+        "# Requires specially crafted container image targeting toolkit < 1.16.2\n"
+        "ls /dev/nvidia* 2>/dev/null\n"
+        "nvidia-container-toolkit --version 2>/dev/null || echo 'toolkit version unknown'"
+    ),
+    "cve_2025_1974": (
+        "# CVE-2025-1974: IngressNightmare - ingress-nginx admission webhook RCE\n"
+        "# Requires network access to ingress-nginx admission webhook (port 8443)\n"
+        "# Check if ingress-nginx is reachable from this pod\n"
+        "curl -sk https://ingress-nginx-controller-admission.ingress-nginx.svc:443/healthz 2>/dev/null && "
+        "echo 'ingress-nginx admission webhook reachable' || echo 'not reachable'"
+    ),
+    "cve_2025_9074": (
+        "# CVE-2025-9074: Docker Desktop container escape\n"
+        "# Affects Docker Desktop on Windows and macOS\n"
+        "# Check Docker Desktop version\n"
+        "docker version 2>/dev/null | grep -A5 'Server:' || echo 'docker version unknown'"
     ),
     "containerd_shim_escape": (
         "# Exploit containerd-shim abstract unix socket\n"

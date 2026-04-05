@@ -262,12 +262,10 @@ def diff_postures(
         no_regression = (
             after_summary.max_score <= before_summary.max_score
             and after_summary.total_chains <= before_summary.total_chains
+            and after_summary.critical_chains <= before_summary.critical_chains
+            and after_summary.high_chains <= before_summary.high_chains
         )
-        has_actual_change = (
-            after_summary.max_score < before_summary.max_score
-            or after_summary.total_chains < before_summary.total_chains
-        )
-        improved = no_regression and has_actual_change
+        improved = no_regression
 
     return DiffResult(
         posture_deltas=posture_deltas,

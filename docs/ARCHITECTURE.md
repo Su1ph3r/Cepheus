@@ -5,7 +5,7 @@
 Cepheus is a two-component container escape modeling tool:
 
 1. **Enumerator** (`cepheus-enum.sh`) — POSIX shell script that runs inside a container and dumps its security posture to JSON
-2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 56 known escape techniques, builds attack chains, scores them, and generates remediation guidance
+2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 65 known escape techniques, builds attack chains, scores them, and generates remediation guidance
 
 ## Data Flow
 
@@ -27,13 +27,13 @@ Cepheus is a two-component container escape modeling tool:
 │  │ • Writable paths          │  │     │  │ ┌──────────┐  ┌────────────┐  │  │
 │  │ • Available tools         │  │     │  │ │ Terminal │  │ JSON Report│  │  │
 │  │ • Runtime detection       │  │     │  │ │ Output   │  │ Output     │  │  │
-│  │ • Credentials             │  │     │  │ ├──────────┤  ├────────────┤  │  │
-│  │ • Kubernetes metadata     │  │     │  │ │ HTML     │  │ MITRE ATT&K│  │  │
-│  │ • Runtime versions        │  │     │  │ │ Report   │  │ Navigator  │  │  │
-│  │                           │  │     │  │ └──────────┘  └────────────┘  │  │
-│  └───────────────────────────┘  │     │  │       ↓ (optional)           │  │
-│                                 │     │  │ ┌──────────────────────────┐  │  │
-│                                 │     │  │ │ LLM Enrichment          │  │  │
+│  │ • GPU info (NVIDIA)       │  │     │  │ ├──────────┤  ├────────────┤  │  │
+│  │ • Sandbox runtime         │  │     │  │ │ HTML     │  │ MITRE ATT&K│  │  │
+│  │ • Credentials             │  │     │  │ │ Report   │  │ Navigator  │  │  │
+│  │ • Kubernetes metadata     │  │     │  │ └──────────┘  └────────────┘  │  │
+│  │ • Runtime versions        │  │     │  │       ↓ (optional)           │  │
+│  │                           │  │     │  │ ┌──────────────────────────┐  │  │
+│  └───────────────────────────┘  │     │  │ │ LLM Enrichment          │  │  │
 │                                 │     │  │ │ (novel patterns, advice) │  │  │
 │                                 │     │  │ └──────────────────────────┘  │  │
 │                                 │     │  └────────────────────────────────┘  │
@@ -51,12 +51,12 @@ Cepheus/
 │   ├── cli.py                        # Typer CLI (analyze, enumerate, techniques, diff)
 │   ├── config.py                     # CepheusConfig (env vars via pydantic-settings)
 │   ├── models/
-│   │   ├── posture.py                # ContainerPosture + KubernetesInfo + sub-models
+│   │   ├── posture.py                # ContainerPosture + RuntimeInfo + GpuInfo + sub-models
 │   │   ├── technique.py              # EscapeTechnique + Prerequisite DSL
 │   │   ├── chain.py                  # EscapeChain + ChainStep
-│   │   └── result.py                 # AnalysisResult + RemediationItem
+│   │   └── result.py                 # AnalysisResult (+ executive_summary) + RemediationItem
 │   ├── engine/
-│   │   ├── technique_db.py           # 56 techniques, declarative prerequisites
+│   │   ├── technique_db.py           # 65 techniques, declarative prerequisites
 │   │   ├── poc_templates.py          # PoC command templates + SafeFormatDict
 │   │   ├── matcher.py                # Prerequisite evaluation engine
 │   │   ├── chainer.py                # Single + combinatorial chain builder
@@ -80,12 +80,12 @@ Cepheus/
 The analysis engine runs a deterministic pipeline:
 
 ### 1. Technique Loading
-`technique_db.py` provides 56 `EscapeTechnique` objects, each with declarative `Prerequisite` checks.
+`technique_db.py` provides 65 `EscapeTechnique` objects, each with declarative `Prerequisite` checks.
 
 ### 2. Prerequisite Matching
 `matcher.py` evaluates each technique's prerequisites against the container posture:
 - Resolves dot-paths into the Pydantic model (e.g., `capabilities.effective`)
-- Applies typed checks: `contains`, `equals`, `not_equals`, `gte`, `lte`, `kernel_gte`, `kernel_lte`, `kernel_between`, `exists`, `not_empty`, `regex`, `version_lte`
+- Applies typed checks: `contains`, `any_of`, `equals`, `not_equals`, `gte`, `lte`, `kernel_gte`, `kernel_lte`, `kernel_between`, `exists`, `not_empty`, `regex`, `version_lte`
 - Missing fields use `confidence_if_absent` (default 0.3) rather than failing — handles incomplete enumeration gracefully
 
 ### 3. Chain Building
@@ -93,13 +93,18 @@ The analysis engine runs a deterministic pipeline:
 - **Single chains**: One technique per chain (direct escape path)
 - **Combinatorial chains**: Multi-prerequisite techniques that combine capabilities
 - **Natural pairings**: Info-disclosure → escalation chains (e.g., credential leak → K8s API abuse)
+- **`max_chain_length` enforcement**: Chains exceeding the configured maximum length (default 3) are pruned
 
 ### 4. Scoring
 `scorer.py` computes a weighted composite score:
 ```
 composite = (reliability × 0.40 + stealth × 0.25 + confidence × 0.35) × length_penalty
 length_penalty = 1.0 / (1.0 + 0.15 × (chain_length - 1))
+sandbox_factor = 0.3 if sandbox_runtime detected, else 1.0
+final_score = composite × sandbox_factor
 ```
+
+When a sandbox runtime is detected (gVisor, Firecracker, Kata), scores are reduced by a 0.3× factor to reflect the significantly lower escape likelihood.
 
 ### 5. Remediation Generation
 The analyzer extracts remediation guidance and runtime flags from matched techniques, sorted by severity.
@@ -111,7 +116,10 @@ Results render in multiple formats:
 - **HTML** — Self-contained HTML report with inline CSS (requires `jinja2`)
 - **MITRE ATT&CK** — Navigator v4.5 layer JSON for ATT&CK heatmaps
 
-### 7. Diff/Delta
+### 7. Executive Summary (optional)
+When `--executive-summary` is passed (requires `--llm`), the CLI generates an LLM-powered executive summary stored in the `executive_summary` field of `AnalysisResult` and rendered at the top of terminal output.
+
+### 8. Diff/Delta
 `differ.py` compares two posture analyses to show remediated and newly introduced risks, with color-coded terminal output (green=remediated, red=new, yellow=changed).
 
 ## Enumerator Design
@@ -133,6 +141,8 @@ Key enumeration sources:
 - Kubernetes — RBAC permissions, pod security standard, sidecar detection, node access indicators
 - Runtime versions — Docker, containerd, CRI-O, runc version detection
 - Environment variables — secret detection (names only, not values)
+- GPU detection — NVIDIA devices, toolkit version, driver version
+- Sandbox runtime detection — gVisor, Firecracker, Kata Containers
 
 ## Configuration
 

@@ -96,6 +96,15 @@ def print_analysis_result(result: AnalysisResult) -> None:
     if result.llm_analysis:
         console.print(Panel(result.llm_analysis, title="[bold]LLM Analysis[/bold]", border_style="magenta"))
 
+    if result.executive_summary:
+        summary_panel = Panel(
+            result.executive_summary,
+            title="Executive Summary",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+        console.print(summary_panel)
+
 
 def print_chain(chain: EscapeChain) -> None:
     """Print detailed view of a single escape chain."""

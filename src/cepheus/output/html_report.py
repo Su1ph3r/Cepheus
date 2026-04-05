@@ -230,16 +230,16 @@ def generate_html(result: AnalysisResult) -> str:
             "jinja2 is required for HTML reports. Install it with: pip install cepheus[html]"
         )
 
-    from markupsafe import Markup
+    from markupsafe import Markup, escape
 
     env = Environment(autoescape=True)
     template = env.from_string(_HTML_TEMPLATE)
     context = _prepare_context(result)
-    # Mark PoC commands as safe — they come from internal templates, not user input
+    # Escape user-interpolated content in PoC commands before marking safe
     for chain in context.get("chains", []):
         for step in chain.get("steps", []):
             if step.get("poc"):
-                step["poc"] = Markup(step["poc"])
+                step["poc"] = Markup(escape(step["poc"]))
     return template.render(**context)
 
 

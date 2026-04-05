@@ -9,6 +9,7 @@ from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,
     CredentialInfo,
+    GpuInfo,
     KernelInfo,
     KubernetesInfo,
     MountInfo,
@@ -103,7 +104,9 @@ def privileged_posture() -> ContainerPosture:
             pid_one="bash",
             orchestrator="kubernetes",
             runc_version="1.1.10",
+            sandbox_runtime=None,
         ),
+        gpu=GpuInfo(),
         kubernetes=KubernetesInfo(
             namespace="default",
             pod_name="debug-pod",
@@ -209,7 +212,7 @@ def sample_analysis_result(sample_posture, sample_chain, sample_technique):
     return AnalysisResult(
         posture=sample_posture,
         chains=[sample_chain],
-        total_techniques_checked=56,
+        total_techniques_checked=65,
         techniques_matched=1,
         remediations=[
             RemediationItem(
