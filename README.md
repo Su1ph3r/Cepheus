@@ -1,316 +1,104 @@
 # Cepheus
 
-**Container Escape Scenario Modeler** — enumerate container security posture and model realistic escape paths with ranked attack chains, tailored PoC commands, and actionable remediation.
+Container escape path enumerator and analyzer.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-170%20passing-brightgreen.svg)](#testing)
+## How it works
 
----
+Cepheus has two components. A POSIX shell enumerator runs inside a container and dumps its security posture to JSON. A Python analysis engine ingests that JSON, matches findings against 65 known escape techniques, builds single- and multi-step attack chains with scored PoC commands, and outputs prioritized results. Chains are ranked by a composite of reliability, stealth, and confidence.
 
-## What is Cepheus?
-
-Cepheus is a two-component container security tool that answers one question: **"Can an attacker escape this container, and how?"**
-
-1. **Enumerator** — a zero-dependency POSIX shell script that runs inside any container and dumps its full security posture to JSON (capabilities, mounts, kernel version, seccomp, AppArmor, namespaces, cgroups, credentials, network config, Kubernetes metadata, runtime versions, writable paths, and available tools).
-
-2. **Analysis Engine** — a Python CLI that ingests the enumerator's JSON output, maps findings against **65 known escape techniques** across 6 categories, builds single-step and multi-step attack chains, generates tailored PoC commands, scores each chain by reliability and stealth, and produces prioritized remediation guidance. Includes GPU/NVIDIA device detection, sandbox runtime detection (gVisor, Firecracker, Kata), and executive summary generation.
-
-Named after the constellation Cepheus — the king who watches over the heavens — it watches over container boundaries.
-
-## Why Cepheus?
-
-| Feature | deepce | CDK | amicontained | BOtB | Cepheus |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Capability enumeration | Partial | Yes | Yes | Partial | **Full** |
-| Kernel CVE correlation | - | - | - | - | **21 CVEs** |
-| Runtime version detection | - | Partial | - | - | **Yes** |
-| Combinatorial chain analysis | - | - | - | - | **21 combos** |
-| Escape path scoring | - | - | - | - | **Weighted** |
-| PoC generation | - | Some | - | Some | **All 65** |
-| Defense enumeration | - | - | Partial | - | **Full** |
-| 2024-2025 CVEs | - | - | - | - | **Yes** |
-| Stealth scoring | - | - | - | - | **Yes** |
-| Multi-step chain building | - | - | - | - | **Yes** |
-| LLM enrichment | - | - | - | - | **Optional** |
-| Zero-dependency enumerator | - | Go binary | Go binary | Go binary | **POSIX shell** |
-
-## Quick Start
-
-### Install
+## Install
 
 ```bash
-# From source
 git clone https://github.com/su1ph3r/Cepheus.git
 cd Cepheus
 pip install -e .
-
-# With LLM support
-pip install -e ".[llm]"
-
-# With HTML report support
-pip install -e ".[html]"
 ```
 
-### Enumerate a Container
+## Usage
 
 ```bash
-# Copy the enumerator into a running container and execute it
+# enumerate a running container
 docker cp enumerator/cepheus-enum.sh mycontainer:/tmp/
 docker exec mycontainer sh /tmp/cepheus-enum.sh > posture.json
 
-# Or use the built-in enumerate command
+# or use the built-in enumerate command
 cepheus enumerate --container-id mycontainer --runtime docker -o posture.json
 ```
 
-### Analyze Escape Paths
-
 ```bash
-# Full analysis with terminal output
+# analyze escape paths
 cepheus analyze posture.json
-
-# Filter by severity
 cepheus analyze posture.json --min-severity high
-
-# JSON output for automation
 cepheus analyze posture.json --format json -o report.json
-
-# MITRE ATT&CK Navigator layer export
 cepheus analyze posture.json --format mitre -o layer.json
-
-# Self-contained HTML report
 cepheus analyze posture.json --format html -o report.html
-
-# With LLM-powered novel pattern analysis
-cepheus analyze posture.json --llm
 ```
 
-### Compare Postures (Diff)
-
 ```bash
-# Compare before/after hardening
+# compare before/after hardening
 cepheus diff before.json after.json
-
-# JSON output
 cepheus diff before.json after.json --format json -o delta.json
 ```
 
-### Browse Techniques
-
 ```bash
-# List all 65 techniques
+# browse techniques
 cepheus techniques
-
-# Filter by category
 cepheus techniques --category capability
-cepheus techniques --category kernel
-
-# Search
 cepheus techniques --search "sys_admin"
 cepheus techniques --severity critical
 ```
 
-## Technique Coverage
+## Technique coverage
 
-Cepheus covers **65 escape techniques** across 6 categories:
+65 techniques across 6 categories:
 
-### Capability-Based (9)
-Escapes leveraging Linux capabilities: `CAP_SYS_ADMIN` mount/cgroup/BPF attacks, `CAP_SYS_PTRACE` process injection, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` for bypassing file permissions, `CAP_NET_ADMIN` network namespace manipulation, `CAP_SYS_RAWIO` raw device I/O, and eBPF `bpf_probe_write_user` kernel memory manipulation.
+- Capability-based: 9 techniques (SYS_ADMIN, SYS_PTRACE, DAC_READ_SEARCH, DAC_OVERRIDE, NET_ADMIN, SYS_RAWIO, BPF probe_write_user, and more)
+- Mount-based: 15 techniques (docker.sock, containerd/CRI-O sockets, core_pattern, sysrq, sysfs, host path mounts, cgroup fs, /dev, shared /dev/shm, /proc/self/fd, device-mapper, /proc/sys/vm)
+- Kernel CVE-based: 17 techniques (CVE-2022-0185, CVE-2022-0847 DirtyPipe, CVE-2024-1086, CVE-2024-21626, CVE-2025-21756, CVE-2024-23651/23652/23653 BuildKit, and 10 more)
+- Runtime/orchestrator: 14 techniques (K8s service account, kubelet API, etcd, Docker API, containerd shim, runc CVE-2019-5736, cloud metadata SSRF, NVIDIA CVEs, IngressNightmare CVE-2025-1974)
+- Combinatorial: 6 multi-prerequisite chains plus dynamic two-step chain building
+- Information disclosure: 4 techniques (env var secrets, cloud metadata credentials, K8s secret mounts, Docker env inspection)
 
-### Mount-Based (15)
-Docker socket mounts, containerd and CRI-O socket mounts, `/proc/sys/kernel/core_pattern` writes, `/proc/sysrq-trigger` abuse, sysfs exploitation, writable host path mounts (`/etc`, `/`), cgroup filesystem escapes, `/dev` device access, systemd cgroup v1 injection, shared `/dev/shm` cross-container data exfiltration, `/proc/self/fd` symlink traversal, device-mapper direct access, and `/proc/sys/vm` parameter manipulation.
-
-### Kernel CVE-Based (17)
-- **CVE-2022-0185** — FSConfig heap overflow (5.1–5.16.2)
-- **CVE-2022-0847** — DirtyPipe (5.8–5.16.11)
-- **CVE-2021-22555** — Netfilter heap OOB write (2.6.19–5.12)
-- **CVE-2022-2588** — route4 use-after-free (< 5.19.2)
-- **CVE-2023-0386** — OverlayFS privilege escalation (5.11–6.2)
-- **CVE-2023-32233** — nf_tables use-after-free (< 6.4)
-- **CVE-2024-1086** — nf_tables double-free (3.15–6.8)
-- **CVE-2021-31440** — eBPF verifier bypass
-- **CVE-2022-23222** — eBPF type confusion
-- **CVE-2024-21626** — runc process.cwd container breakout
-- **CVE-2024-53104** — USB Video Class OOB write
-- **CVE-2025-21756** — vsock use-after-free
-- **CVE-2024-23651** — BuildKit mount cache race condition
-- **CVE-2024-23652** — BuildKit arbitrary host file deletion
-- **CVE-2024-23653** — BuildKit privilege check bypass
-- **CVE-2024-24557** — runc image build cache poisoning
-- **CVE-2024-23650** — BuildKit daemon crash via malicious gRPC
-
-### Runtime / Orchestrator (14)
-Kubernetes service account abuse, kubelet API access, etcd direct access, unauthenticated Docker API, containerd shim escape, runc `/proc/self/exe` overwrite (CVE-2019-5736), cloud metadata SSRF, kubelet node proxy, AppArmor unconfined profile detection, SELinux disabled/unconfined detection, NVIDIA Container Toolkit device access (CVE-2024-0132), NVIDIA device mount escape (CVE-2024-0133), IngressNightmare unauthenticated RCE (CVE-2025-1974), and Docker Desktop file sharing escape (CVE-2025-3224).
-
-### Combinatorial (6)
-Multi-prerequisite chains: `SYS_ADMIN + no seccomp`, `privileged + docker.sock`, `NET_RAW + metadata`, `writable procfs + privileged`, `user namespace + kernel CVE`, `SYS_ADMIN + no AppArmor`. The chainer also builds dynamic two-step chains like LSM unconfined + capability escalation and shared memory + ptrace injection.
-
-### Information Disclosure (4)
-Environment variable secret leaks, cloud instance credential theft via metadata service, Kubernetes configmap/secret volume mounts, and Docker environment inspection via API.
-
-## Scoring Model
-
-Each escape chain receives a **composite score** based on three weighted factors:
+## Scoring
 
 ```
 composite = (reliability × 0.40 + stealth × 0.25 + confidence × 0.35) × length_penalty
 ```
 
-| Factor | Weight | Description |
-|---|---|---|
-| **Reliability** | 0.40 | How consistently the technique succeeds |
-| **Stealth** | 0.25 | Likelihood of evading monitoring/detection |
-| **Confidence** | 0.35 | How certain we are prerequisites are met |
-| **Length penalty** | -15%/step | Multi-step chains are penalized for complexity |
-
-Chains are ranked highest-score-first. Missing posture data uses a configurable default confidence (0.3) rather than discarding the technique — incomplete enumeration degrades gracefully.
-
-## Enumerator
-
-The enumerator is a **834-line POSIX shell script** with zero external dependencies. It runs anywhere:
-
-| Environment | Shell | Status |
-|---|---|---|
-| Alpine | busybox sh | Supported |
-| Ubuntu / Debian | dash / bash | Supported |
-| Distroless | (copy script in) | Supported |
-| Scratch containers | (copy script in) | Supported |
-
-What it enumerates:
-- **Capabilities** — full hex decode of CapEff, CapBnd, CapPrm from `/proc/self/status`
-- **Mounts** — all mount points, filesystem types, and options
-- **Kernel** — version parsed into major.minor.patch for CVE correlation
-- **Cgroups** — v1 vs v2 detection
-- **Security** — seccomp mode, AppArmor profile, SELinux context
-- **Namespaces** — PID/net/mnt/user/UTS/IPC/cgroup isolation via inode comparison
-- **Network** — interfaces, cloud metadata reachability, Docker/containerd/CRI-O socket access, listening ports
-- **Credentials** — K8s service account tokens, environment variable names matching secret patterns, cloud metadata availability
-- **Runtime** — Docker/containerd/cri-o/Kubernetes detection, PID 1 process, runc version detection
-- **Kubernetes** — RBAC permissions, pod security standard, sidecar detection, node access indicators
-- **Tools** — 30+ binary availability checks (curl, wget, gcc, mount, nsenter, docker, kubectl, runc, etc.)
-- **Writable paths** — sensitive path write access testing
-
-Output is a single JSON object conforming to the `ContainerPosture` schema.
+Chains are ranked highest-score-first. Multi-step chains receive a 15%-per-step length penalty. Missing posture data defaults to 0.3 confidence rather than discarding the technique.
 
 ## Configuration
 
-All settings are configurable via environment variables with the `CEPHEUS_` prefix:
-
 ```bash
-# Analysis
-export CEPHEUS_MIN_CONFIDENCE=0.3          # Minimum confidence threshold
-export CEPHEUS_MAX_CHAIN_LENGTH=3          # Maximum chain step count
-
-# Scoring weights (must sum to 1.0)
-export CEPHEUS_WEIGHT_RELIABILITY=0.40
-export CEPHEUS_WEIGHT_STEALTH=0.25
-export CEPHEUS_WEIGHT_CONFIDENCE=0.35
-export CEPHEUS_CHAIN_LENGTH_PENALTY=0.15   # Per-step penalty
-export CEPHEUS_SANDBOX_MITIGATION_FACTOR=0.6  # Score reduction for sandbox runtimes
-
-# LLM enrichment (optional)
-export CEPHEUS_LLM_MODEL=anthropic/claude-sonnet-4-20250514
-export CEPHEUS_LLM_API_KEY=sk-...
-export CEPHEUS_LLM_TEMPERATURE=0.3
-export CEPHEUS_LLM_MAX_TOKENS=4096
+CEPHEUS_MIN_CONFIDENCE=0.3          # minimum confidence threshold
+CEPHEUS_MAX_CHAIN_LENGTH=3          # maximum chain step count
+CEPHEUS_WEIGHT_RELIABILITY=0.40     # scoring weight: reliability
+CEPHEUS_WEIGHT_STEALTH=0.25         # scoring weight: stealth
+CEPHEUS_WEIGHT_CONFIDENCE=0.35      # scoring weight: confidence
+CEPHEUS_CHAIN_LENGTH_PENALTY=0.15   # per-step penalty
+CEPHEUS_SANDBOX_MITIGATION_FACTOR=0.6  # score reduction for sandbox runtimes
+CEPHEUS_LLM_MODEL=anthropic/claude-sonnet-4-20250514  # litellm model string
+CEPHEUS_LLM_API_KEY=sk-...          # API key for LLM enrichment
+CEPHEUS_LLM_TEMPERATURE=0.3         # LLM sampling temperature
+CEPHEUS_LLM_MAX_TOKENS=4096         # LLM max response tokens
 ```
 
-## Architecture
+## Enumerator details
 
-```
-Enumerator (POSIX sh)          Analysis Engine (Python)
-┌──────────────┐               ┌────────────────────────────┐
-│ cepheus-enum │──── JSON ────→│ Matcher                    │
-│   .sh        │               │   ↓                        │
-└──────────────┘               │ Chainer                    │
-                               │   ↓                        │
-                               │ Scorer                     │
-                               │   ↓                        │
-                               │ Output (terminal/JSON/     │
-                               │         HTML/MITRE)        │
-                               │   ↓ (optional)             │
-                               │ LLM Enrichment             │
-                               └────────────────────────────┘
-```
+The enumerator is an 834-line POSIX shell script with zero external dependencies — it runs under busybox sh, dash, bash, and inside distroless or scratch containers. It collects capabilities (full hex decode of CapEff/CapBnd/CapPrm), mounts and filesystem types, kernel version, cgroup v1/v2 detection, seccomp mode, AppArmor/SELinux profiles, namespace isolation via inode comparison, network interfaces, cloud metadata reachability, socket access, K8s service account tokens, secret-pattern env vars, runtime detection, RBAC permissions, 30+ tool availability checks, and writable sensitive paths.
 
-For full architecture details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## LLM support
 
-## LLM Integration
-
-LLM enrichment is **optional** — the core analysis is fully deterministic. When enabled with `--llm`, it adds:
-
-- **Novel combination analysis** — identifies escape patterns not in the technique database
-- **Contextual remediation** — tailored advice for your specific environment
-- **Executive summary** — natural language overview of findings
-
-Powered by [LiteLLM](https://github.com/BerriAI/litellm), supporting OpenAI, Anthropic, local models, and 100+ providers.
-
-```bash
-pip install cepheus[llm]
-export CEPHEUS_LLM_API_KEY=your-key
-cepheus analyze posture.json --llm
-```
+LLM enrichment is optional and adds novel combination analysis, contextual remediation, and executive summaries via LiteLLM. Install with `pip install -e ".[llm]"` and pass `--llm` to the analyze command.
 
 ## Testing
 
 ```bash
 pip install -e ".[dev]"
-pytest                                     # 170 tests
-pytest --cov=cepheus --cov-report=term     # with coverage
+pytest
+pytest --cov=cepheus --cov-report=term
 ```
-
-## Use Cases
-
-- **Penetration testing** — identify container escape paths during authorized engagements
-- **Red team exercises** — model attack chains with realistic PoC commands
-- **Blue team hardening** — scan containers for misconfigurations with prioritized remediations
-- **CI/CD security gates** — integrate JSON output into pipeline checks
-- **Security audits** — document container security posture with evidence
-- **Training and CTFs** — learn container escape techniques with hands-on PoCs
-
-## Responsible Use
-
-Cepheus is a **defensive security tool** for authorized assessments. Do not use it against systems you do not own or have explicit written permission to test. See [SECURITY.md](SECURITY.md) for the full security policy.
-
-## Cross-Tool Integration
-
-Cepheus participates in a cross-tool security pipeline:
-
-```
-Nubicustos (cloud) ──containers──> Cepheus (container escape)
-Reticustos (network) ──endpoints──> Indago (API fuzzing)
-Indago (API fuzzing) ──WAF-blocked──> BypassBurrito (WAF bypass)
-Ariadne (attack paths) ──endpoints──> Indago (API fuzzing)
-All tools ──findings──> Vinculum (correlation) ──export──> Ariadne (attack paths)
-```
-
-### Importing from Nubicustos
-
-Enrich container escape analysis with cloud context from Nubicustos:
-
-```bash
-# Export containers from Nubicustos
-curl -o containers.json "http://localhost:8000/api/exports/containers"
-
-# Analyze with cloud context
-cepheus analyze posture.json --from-nubicustos containers.json
-```
-
-### Exporting to Vinculum
-
-Export analysis results for correlation in Vinculum:
-
-```bash
-cepheus analyze posture.json --format json -o escape_report.json
-vinculum ingest escape_report.json --format ariadne --output correlated.json
-```
-
-See also: [Vinculum](https://github.com/Su1ph3r/vinculum) | [Nubicustos](https://github.com/Su1ph3r/Nubicustos) | [Reticustos](https://github.com/Su1ph3r/Reticustos) | [Indago](https://github.com/Su1ph3r/indago) | [BypassBurrito](https://github.com/Su1ph3r/bypassburrito) | [Ariadne](https://github.com/Su1ph3r/ariadne)
-
-## Contributing
-
-Contributions welcome — especially new escape techniques and CVEs. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2026 su1ph3r
+[MIT](LICENSE)
