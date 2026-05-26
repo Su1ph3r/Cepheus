@@ -53,9 +53,13 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install ruff
-        # Pin ruff to a known-good version so a release of ruff that adds
-        # new rules can't silently turn the CI red. Bump deliberately.
-        run: pip install "ruff==0.8.4"
+        # Pin ruff to a known-good version so an upstream release that
+        # adds new rules or changes formatter heuristics can't silently
+        # turn the CI red. Bump deliberately, in lockstep with the
+        # version that maintainers run locally. (ruff's formatter
+        # changes wrapping/parenthesization rules across minor versions
+        # — e.g. 0.8 vs 0.15 differ on assert+f-string layout.)
+        run: pip install "ruff==0.15.14"
 
       - name: ruff check
         run: ruff check .
