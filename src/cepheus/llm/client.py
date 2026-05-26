@@ -26,10 +26,7 @@ class LLMClient:
         try:
             import litellm  # noqa: F401
         except ImportError:
-            raise ImportError(
-                "LLM features require the 'llm' extra. "
-                "Install with: pip install cepheus[llm]"
-            )
+            raise ImportError("LLM features require the 'llm' extra. Install with: pip install cepheus[llm]")
 
     async def analyze_posture(
         self,
@@ -69,6 +66,7 @@ class LLMClient:
             asyncio.get_running_loop()
             # Already in an event loop — run in a thread to avoid RuntimeError
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(asyncio.run, self.analyze_posture(posture, chains))
                 return future.result()
@@ -105,6 +103,7 @@ class LLMClient:
         try:
             asyncio.get_running_loop()
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(asyncio.run, self.summarize(result))
                 return future.result()

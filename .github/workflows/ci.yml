@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same ref when a newer push lands.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (dev + html for tests)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,html]"
+
+      - name: Run pytest
+        run: pytest -q --cov=cepheus --cov-report=term-missing
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install ruff
+        # Pin ruff to a known-good version so a release of ruff that adds
+        # new rules can't silently turn the CI red. Bump deliberately.
+        run: pip install "ruff==0.8.4"
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+  enumerator-shell-lint:
+    name: enumerator (dash parse)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dash
+        run: sudo apt-get update && sudo apt-get install -y dash
+
+      - name: dash -n (POSIX parse-only)
+        # The enumerator must be parseable by busybox sh / dash, which
+        # several distroless and Alpine containers ship. The .gitattributes
+        # in this repo enforces LF line endings to keep this gate honest
+        # under Windows-host checkouts.
+        # NOTE: shellcheck is intentionally NOT added here yet — adding it
+        # in R2 alongside the planned enumerator expansion so we audit
+        # findings in one pass instead of trickling them in.
+        run: dash -n enumerator/cepheus-enum.sh

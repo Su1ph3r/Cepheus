@@ -8,8 +8,11 @@ from cepheus.models.technique import EscapeTechnique, Severity, TechniqueCategor
 
 def _tech(id: str = "t") -> EscapeTechnique:
     return EscapeTechnique(
-        id=id, name="Test", category=TechniqueCategory.CAPABILITY,
-        severity=Severity.HIGH, description="test",
+        id=id,
+        name="Test",
+        category=TechniqueCategory.CAPABILITY,
+        severity=Severity.HIGH,
+        description="test",
     )
 
 

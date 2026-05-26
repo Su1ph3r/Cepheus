@@ -129,8 +129,12 @@ def build_combinatorial_chains(
 
 
 def _build_two_step_chain(
-    tech_a: EscapeTechnique, conf_a: float, poc_a: str,
-    tech_b: EscapeTechnique, conf_b: float, poc_b: str,
+    tech_a: EscapeTechnique,
+    conf_a: float,
+    poc_a: str,
+    tech_b: EscapeTechnique,
+    conf_b: float,
+    poc_b: str,
 ) -> EscapeChain:
     """Build a two-step chain from two matched techniques."""
     step1 = ChainStep(technique=tech_a, poc_command=poc_a, prerequisite_confidence=conf_a)

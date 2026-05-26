@@ -99,10 +99,14 @@ def _load_posture(posture_file: Path):
 def analyze(
     posture_file: Path = typer.Argument(..., help="Path to posture JSON from enumerator"),
     format: OutputFormat = typer.Option(OutputFormat.terminal, "--format", "-f", help="Output format"),
-    min_severity: SeverityFilter = typer.Option(SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"),
+    min_severity: SeverityFilter = typer.Option(
+        SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"
+    ),
     llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
-    executive_summary: bool = typer.Option(False, "--executive-summary", help="Generate LLM executive summary (requires --llm)"),
+    executive_summary: bool = typer.Option(
+        False, "--executive-summary", help="Generate LLM executive summary (requires --llm)"
+    ),
 ) -> None:
     """Analyze a container posture JSON file and identify escape paths."""
     posture = _load_posture(posture_file)
@@ -290,9 +294,7 @@ def techniques(
         techs = [
             t
             for t in techs
-            if search_lower in t.name.lower()
-            or search_lower in t.description.lower()
-            or search_lower in t.id.lower()
+            if search_lower in t.name.lower() or search_lower in t.description.lower() or search_lower in t.id.lower()
         ]
 
     if not techs:

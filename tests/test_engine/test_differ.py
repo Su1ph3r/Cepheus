@@ -1,7 +1,5 @@
 """Tests for the posture diff engine."""
 
-import pytest
-
 from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,

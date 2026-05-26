@@ -1,7 +1,6 @@
 """Tests for the MITRE ATT&CK Navigator layer export."""
 
 import json
-from pathlib import Path
 
 from cepheus.output.mitre_layer import SEVERITY_COLORS, SEVERITY_SCORES, generate_layer, write_layer
 

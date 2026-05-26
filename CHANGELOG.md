@@ -7,7 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-05-26
+## [0.3.2] - 2026-05-26
+
+A regression-safety release. The v0.3.1 precision overhaul reached
+100% precision and 100% recall on the 10-pod K8s Goat benchmark; this
+release locks that result in via fixture-driven tests, bootstraps CI,
+and lands a couple of small polish items.
+
+### Added
+
+- **Regression-precision suite** — 10 real-world container postures
+  captured from a K8s Goat cluster on `kind` are now committed at
+  `tests/fixtures/k8s-goat/` and asserted by
+  `tests/test_precision_benchmark.py`. Per-pod `EXPECTED_MATCHES` sets
+  fail loudly on any technique drift; a shared `FORBIDDEN_TECHNIQUES`
+  list ensures the 26 confirmed false positives from the v0.3.1 audit
+  never match these postures again. Marked `@pytest.mark.benchmark` so
+  the unit suite stays fast.
+- **GitHub Actions CI** — new `.github/workflows/ci.yml` runs three
+  jobs on every PR and push to `main`:
+  - `pytest` matrix on Python 3.11 / 3.12 / 3.13 (ubuntu-latest) with
+    pip caching and coverage.
+  - `ruff` (check + format check) pinned to a known-good version so
+    upstream ruff releases can't silently red the build.
+  - `dash -n` on the enumerator to catch bashisms that would break it
+    under busybox/distroless sh. (Shellcheck deliberately deferred to
+    v0.3.3 when the enumerator gets its planned expansion.)
+- Pytest `benchmark` marker registered in `pyproject.toml`. Skip with
+  `pytest -m "not benchmark"` during fast local iteration.
+
+### Changed
+
+- **MITRE ATT&CK coverage audit** — 10 techniques now reference more
+  precise sub-techniques or additional MITRE IDs:
+  - `cap_sys_ptrace`, `cap_dac_read_search`, `cap_dac_override`,
+    `cap_sys_rawio` now also reference `T1611` (Escape to Host)
+    alongside their respective primitive (T1055/T1005/T1565/T1006).
+  - `cloud_metadata_creds`, `cloud_metadata_ssrf`, `cap_net_raw_metadata`
+    now reference `T1552.005` (Cloud Instance Metadata API) instead of
+    the bare parent `T1552`.
+  - `k8s_configmap_secrets`, `docker_env_inspection` now reference
+    `T1552.007` (Container API) instead of bare `T1552`.
+  - `env_secret_leak` now also references `T1552.001` (Credentials in
+    Files) — the closest sub-technique for env-var exposure via
+    `/proc/<pid>/environ`.
+- **Codebase ruff-normalised.** First CI run on a fresh checkout would
+  have failed on 12 lint issues and 22 files needing reformat — fixed
+  in-tree as part of this release so the lint gate isn't immediately
+  red. One real test bug fixed in the process: a missing `assert
+  len(two_step) > 0` in `tests/test_engine/test_chainer.py::test_max_chain_length_enforcement`.
+
+### Fixed
+
+- **Enumerator hostPID perf (CEPH-2)** — the sidecar-detection loop in
+  `enumerator/cepheus-enum.sh` previously iterated every PID visible
+  in `/proc`. On pods with `hostPID: true` (typical for monitoring
+  sidecars) this turned into a hundreds-of-PIDs-per-iteration hot loop
+  that blew past `kubectl exec`'s default 60s timeout. The loop now
+  short-circuits when the pod has its own PID namespace (`NS_PID=true`)
+  and caps iteration at 200 PIDs otherwise.
+
+
 
 This release supersedes the unreleased v0.4.0 development line. It rolls up
 every change since v0.3.0 — 9 new escape techniques, GPU/sandbox detection,
@@ -131,7 +191,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Su1ph3r/Cepheus/releases/tag/v0.2.0

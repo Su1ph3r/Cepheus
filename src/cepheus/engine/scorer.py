@@ -7,7 +7,9 @@ from cepheus.models.chain import EscapeChain
 from cepheus.models.posture import ContainerPosture
 
 
-def score_chain(chain: EscapeChain, config: CepheusConfig | None = None, posture: ContainerPosture | None = None) -> EscapeChain:
+def score_chain(
+    chain: EscapeChain, config: CepheusConfig | None = None, posture: ContainerPosture | None = None
+) -> EscapeChain:
     """Compute the weighted composite score for an escape chain.
 
     Formula:
@@ -23,11 +25,7 @@ def score_chain(chain: EscapeChain, config: CepheusConfig | None = None, posture
     w_s = config.weight_stealth
     w_c = config.weight_confidence
 
-    raw_score = (
-        chain.reliability_score * w_r
-        + chain.stealth_score * w_s
-        + chain.confidence_score * w_c
-    )
+    raw_score = chain.reliability_score * w_r + chain.stealth_score * w_s + chain.confidence_score * w_c
 
     chain_length = len(chain.steps)
     length_penalty = 1.0 / (1.0 + config.chain_length_penalty * max(0, chain_length - 1))
@@ -41,7 +39,9 @@ def score_chain(chain: EscapeChain, config: CepheusConfig | None = None, posture
     return chain
 
 
-def rank_chains(chains: list[EscapeChain], config: CepheusConfig | None = None, posture: ContainerPosture | None = None) -> list[EscapeChain]:
+def rank_chains(
+    chains: list[EscapeChain], config: CepheusConfig | None = None, posture: ContainerPosture | None = None
+) -> list[EscapeChain]:
     """Score and rank chains by composite_score descending."""
     if config is None:
         config = CepheusConfig()

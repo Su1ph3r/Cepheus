@@ -1,0 +1,71 @@
+{
+  "enumeration_version": "0.1.0",
+  "timestamp": "2026-05-26T11:24:28Z",
+  "hostname": "metadata-db-bd6bd7d97-4ph7b",
+  "kernel": {
+    "version": "6.6.114.1-microsoft-standard-WSL2",
+    "major": 6,
+    "minor": 6,
+    "patch": 114
+  },
+  "capabilities": {
+    "effective": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_NET_BIND_SERVICE", "CAP_NET_RAW", "CAP_SYS_CHROOT", "CAP_MKNOD", "CAP_AUDIT_WRITE", "CAP_SETFCAP"],
+    "bounding": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_NET_BIND_SERVICE", "CAP_NET_RAW", "CAP_SYS_CHROOT", "CAP_MKNOD", "CAP_AUDIT_WRITE", "CAP_SETFCAP"],
+    "permitted": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_NET_BIND_SERVICE", "CAP_NET_RAW", "CAP_SYS_CHROOT", "CAP_MKNOD", "CAP_AUDIT_WRITE", "CAP_SETFCAP"]
+  },
+  "mounts": [{"source": "overlay", "destination": "/", "fstype": "overlay", "options": ["rw", "relatime", "lowerdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/142/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/141/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/140/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/139/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/138/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/137/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/136/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/135/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/134/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/133/fs", "upperdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/143/fs", "workdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/143/work", "uuid=on"]}, {"source": "proc", "destination": "/proc", "fstype": "proc", "options": ["rw", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "tmpfs", "destination": "/dev", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "devpts", "destination": "/dev/pts", "fstype": "devpts", "options": ["rw", "nosuid", "noexec", "relatime", "gid=5", "mode=620", "ptmxmode=666"]}, {"source": "mqueue", "destination": "/dev/mqueue", "fstype": "mqueue", "options": ["rw", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "sysfs", "destination": "/sys", "fstype": "sysfs", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "cgroup", "destination": "/sys/fs/cgroup", "fstype": "cgroup2", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/hosts", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/dev/termination-log", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/hostname", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/resolv.conf", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "shm", "destination": "/dev/shm", "fstype": "tmpfs", "options": ["rw", "nosuid", "nodev", "noexec", "relatime", "size=65536k"]}, {"source": "tmpfs", "destination": "/run/secrets/kubernetes.io/serviceaccount", "fstype": "tmpfs", "options": ["ro", "relatime", "size=61440k", "noswap"]}, {"source": "proc", "destination": "/proc/bus", "fstype": "proc", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "proc", "destination": "/proc/fs", "fstype": "proc", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "proc", "destination": "/proc/irq", "fstype": "proc", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "proc", "destination": "/proc/sys", "fstype": "proc", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "proc", "destination": "/proc/sysrq-trigger", "fstype": "proc", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "tmpfs", "destination": "/proc/acpi", "fstype": "tmpfs", "options": ["ro", "relatime"]}, {"source": "tmpfs", "destination": "/proc/kcore", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "tmpfs", "destination": "/proc/keys", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "tmpfs", "destination": "/proc/latency_stats", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "tmpfs", "destination": "/proc/timer_list", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "tmpfs", "destination": "/proc/scsi", "fstype": "tmpfs", "options": ["ro", "relatime"]}, {"source": "tmpfs", "destination": "/sys/firmware", "fstype": "tmpfs", "options": ["ro", "relatime"]}],
+  "namespaces": {
+    "pid": true,
+    "net": true,
+    "mnt": true,
+    "user": false,
+    "uts": true,
+    "ipc": true,
+    "cgroup": true
+  },
+  "security": {
+    "seccomp": "filtering",
+    "apparmor": "kernel",
+    "selinux": null
+  },
+  "network": {
+    "interfaces": ["eth0", "lo"],
+    "can_reach_metadata": false,
+    "can_reach_docker_sock": false,
+    "can_reach_containerd_sock": false,
+    "can_reach_crio_sock": false,
+    "listening_ports": [80]
+  },
+  "credentials": {
+    "service_account_token": true,
+    "environment_secrets": [],
+    "cloud_metadata_available": false
+  },
+  "runtime": {
+    "runtime": "unknown",
+    "runtime_version": null,
+    "orchestrator": "kubernetes",
+    "privileged": false,
+    "pid_one": "metadata-db",
+    "runc_version": null,
+    "sandbox_runtime": null
+  },
+  "gpu": {
+    "nvidia_devices": [],
+    "nvidia_toolkit_version": null,
+    "nvidia_driver_version": null
+  },
+  "kubernetes": {
+    "rbac_permissions": ["selfsubjectrulesreview/available"],
+    "pod_security_standard": "restricted",
+    "has_sidecar": false,
+    "sidecar_type": null,
+    "node_access_indicators": [],
+    "namespace": "default",
+    "pod_name": "metadata-db-bd6bd7d97-4ph7b",
+    "node_name": null
+  },
+  "cgroup_version": 2,
+  "writable_paths": ["/proc/sysrq-trigger", "/proc/sys/kernel/core_pattern", "/sys", "/sys/fs/cgroup", "/dev", "/dev/shm", "/proc/sys/vm", "/proc/self/fd", "/sys/kernel/security", "/sys/kernel/uevent_helper", "/sys/devices/virtual/misc/device-mapper/dev"],
+  "available_tools": ["curl", "wget", "mount", "umount", "nsenter", "ip", "nc", "apk", "sh", "tar", "gzip", "awk", "sed", "grep", "find", "xargs", "crontab"]
+}

@@ -1,7 +1,5 @@
 """Tests for the HTML report output."""
 
-import pytest
-
 from cepheus.output.html_report import generate_html, write_html
 
 
@@ -33,7 +31,7 @@ def test_html_self_contained(sample_analysis_result):
     html = generate_html(sample_analysis_result)
     # Should not reference external CSS/JS
     assert "https://" not in html or "https://kubernetes" in html  # Allow ref URLs in content
-    assert "<link rel=\"stylesheet\"" not in html
+    assert '<link rel="stylesheet"' not in html
     assert "<script src=" not in html
 
 

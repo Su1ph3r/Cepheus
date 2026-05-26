@@ -1,7 +1,6 @@
 """Tests for the Cepheus CLI."""
 
 import json
-from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -23,9 +22,20 @@ def sample_posture_file(tmp_path):
         "mounts": [],
         "namespaces": {"pid": True, "net": True, "mnt": True, "user": True, "uts": True, "ipc": True, "cgroup": True},
         "security": {"seccomp": "disabled", "apparmor": None, "selinux": None},
-        "network": {"interfaces": ["eth0"], "can_reach_metadata": False, "can_reach_docker_sock": False, "listening_ports": []},
+        "network": {
+            "interfaces": ["eth0"],
+            "can_reach_metadata": False,
+            "can_reach_docker_sock": False,
+            "listening_ports": [],
+        },
         "credentials": {"service_account_token": False, "environment_secrets": [], "cloud_metadata_available": False},
-        "runtime": {"runtime": "docker", "runtime_version": None, "orchestrator": None, "privileged": False, "pid_one": "bash"},
+        "runtime": {
+            "runtime": "docker",
+            "runtime_version": None,
+            "orchestrator": None,
+            "privileged": False,
+            "pid_one": "bash",
+        },
         "cgroup_version": 1,
         "writable_paths": [],
         "available_tools": [],
@@ -101,10 +111,13 @@ def test_techniques_search_no_results():
 
 def test_analyze_mitre_format(sample_posture_file, tmp_path):
     output_path = tmp_path / "layer.json"
-    result = runner.invoke(app, ["analyze", str(sample_posture_file), "--format", "mitre", "--output", str(output_path)])
+    result = runner.invoke(
+        app, ["analyze", str(sample_posture_file), "--format", "mitre", "--output", str(output_path)]
+    )
     assert result.exit_code == 0
     assert output_path.exists()
     import json
+
     data = json.loads(output_path.read_text())
     assert data["domain"] == "enterprise-attack"
 

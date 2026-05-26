@@ -646,9 +646,29 @@ collect_kubernetes() {
         K8S_HAS_SIDECAR="true"
         K8S_SIDECAR_TYPE="linkerd"
     fi
-    # Scan /proc for envoy or linkerd-proxy processes if not already found
-    if [ "$K8S_HAS_SIDECAR" = "false" ] && [ -d /proc ]; then
+    # Scan /proc for envoy or linkerd-proxy processes if not already found.
+    #
+    # Perf note (CEPH-2): a previous version of this loop iterated every
+    # PID visible in /proc. On pods with hostPID:true (e.g. monitoring
+    # sidecars, kind-on-WSL nodes) /proc exposes hundreds-to-thousands of
+    # host PIDs, turning the per-PID `cat` into a 60-300s hot loop and
+    # blowing past `kubectl exec`'s default timeout.
+    #
+    # Mitigations:
+    #   1. Skip the loop entirely when this pod has its own PID namespace
+    #      (NS_PID=true). Sidecars live in the pod's PID namespace, so the
+    #      env-var check above already covers the common case, and there
+    #      is no reason to walk host PIDs.
+    #   2. When the loop does run (hostPID:true), cap iteration at the
+    #      first $_pid_scan_max PIDs and break early on first match.
+    if [ "$K8S_HAS_SIDECAR" = "false" ] && [ "$NS_PID" = "true" ] && [ -d /proc ]; then
+        _pid_scan_max=200
+        _pid_scanned=0
         for _pid_dir in /proc/[0-9]*; do
+            _pid_scanned=$((_pid_scanned + 1))
+            if [ "$_pid_scanned" -gt "$_pid_scan_max" ]; then
+                break
+            fi
             _comm=$(cat "$_pid_dir/comm" 2>/dev/null || true)
             case "$_comm" in
                 envoy|pilot-agent)

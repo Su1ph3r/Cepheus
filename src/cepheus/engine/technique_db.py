@@ -52,10 +52,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             name="cgroup release_agent escape",
             category=TechniqueCategory.CAPABILITY,
             severity=Severity.CRITICAL,
-            description=(
-                "Abuse cgroup v1 release_agent to execute commands on the host "
-                "when a cgroup becomes empty."
-            ),
+            description=("Abuse cgroup v1 release_agent to execute commands on the host when a cgroup becomes empty."),
             prerequisites=[
                 Prerequisite(
                     check_field="capabilities.effective",
@@ -115,8 +112,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.CAPABILITY,
             severity=Severity.HIGH,
             description=(
-                "With CAP_SYS_PTRACE and a shared PID namespace, attach to host "
-                "processes and inject code for escape."
+                "With CAP_SYS_PTRACE and a shared PID namespace, attach to host processes and inject code for escape."
             ),
             prerequisites=[
                 Prerequisite(
@@ -132,7 +128,10 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="PID namespace must be shared with host",
                 ),
             ],
-            mitre_attack=["T1055"],
+            # T1055 (Process Injection) covers the ptrace primitive itself;
+            # T1611 (Escape to Host) covers the outcome when the target PID
+            # is a host process (hostPID:true). Both apply here.
+            mitre_attack=["T1055", "T1611"],
             references=[
                 "https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts",
             ],
@@ -157,7 +156,10 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Requires CAP_DAC_READ_SEARCH capability",
                 ),
             ],
-            mitre_attack=["T1005"],
+            # T1005 (Data from Local System) covers the read; T1611 (Escape
+            # to Host) covers the impact when the bypass is used to read
+            # host secrets (admin.conf, /etc/kubernetes/pki/*).
+            mitre_attack=["T1005", "T1611"],
             references=[
                 "https://man7.org/linux/man-pages/man7/capabilities.7.html",
             ],
@@ -197,7 +199,10 @@ def _build_techniques() -> list[EscapeTechnique]:
                     confidence_if_absent=0.2,
                 ),
             ],
-            mitre_attack=["T1565"],
+            # T1565 (Data Manipulation) covers the unauthorized write;
+            # T1611 (Escape to Host) covers the outcome when the writable
+            # target lives in the host mount namespace.
+            mitre_attack=["T1565", "T1611"],
             references=[
                 "https://man7.org/linux/man-pages/man7/capabilities.7.html",
                 "https://docs.docker.com/engine/security/#linux-kernel-capabilities",
@@ -248,7 +253,10 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Requires CAP_SYS_RAWIO capability",
                 ),
             ],
-            mitre_attack=["T1006"],
+            # T1006 (Direct Volume Access) covers raw device I/O;
+            # T1611 (Escape to Host) covers the impact when the raw
+            # device exposes host content (block devices, /dev/mem).
+            mitre_attack=["T1006", "T1611"],
             references=[
                 "https://man7.org/linux/man-pages/man7/capabilities.7.html",
             ],
@@ -783,9 +791,7 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_field="capabilities.effective",
                     check_type="contains",
                     check_value="CAP_SYS_ADMIN",
-                    description=(
-                        "CAP_SYS_ADMIN required to write kernel sysctls"
-                    ),
+                    description=("CAP_SYS_ADMIN required to write kernel sysctls"),
                     confidence_if_absent=0.0,
                 ),
             ],
@@ -884,10 +890,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             name="route4 use-after-free",
             category=TechniqueCategory.KERNEL,
             severity=Severity.CRITICAL,
-            description=(
-                "Use-after-free in net/sched/cls_route.c allows privilege "
-                "escalation from container to host."
-            ),
+            description=("Use-after-free in net/sched/cls_route.c allows privilege escalation from container to host."),
             prerequisites=[
                 Prerequisite(
                     check_field="kernel.version",
@@ -963,8 +966,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.KERNEL,
             severity=Severity.CRITICAL,
             description=(
-                "Double-free in nf_tables verdict handling enables arbitrary "
-                "code execution and container escape."
+                "Double-free in nf_tables verdict handling enables arbitrary code execution and container escape."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1335,8 +1337,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.RUNTIME,
             severity=Severity.HIGH,
             description=(
-                "Direct access to the kubelet API (port 10250) allows "
-                "executing commands in any pod on the node."
+                "Direct access to the kubelet API (port 10250) allows executing commands in any pod on the node."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1530,7 +1531,9 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Metadata endpoint must be reachable",
                 ),
             ],
-            mitre_attack=["T1552"],
+            # T1552.005 is the specific sub-technique for cloud instance
+            # metadata API abuse (vs. the parent T1552 "Unsecured Credentials").
+            mitre_attack=["T1552.005"],
             references=[
                 "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html",
             ],
@@ -1613,10 +1616,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             name="Kubelet node proxy abuse",
             category=TechniqueCategory.RUNTIME,
             severity=Severity.HIGH,
-            description=(
-                "Abuse kubelet proxy endpoint to forward traffic to other "
-                "pods and services on the node."
-            ),
+            description=("Abuse kubelet proxy endpoint to forward traffic to other pods and services on the node."),
             prerequisites=[
                 Prerequisite(
                     check_field="runtime.orchestrator",
@@ -1806,8 +1806,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.COMBINATORIAL,
             severity=Severity.CRITICAL,
             description=(
-                "A privileged container with Docker socket access provides "
-                "trivial, near-guaranteed escape to the host."
+                "A privileged container with Docker socket access provides trivial, near-guaranteed escape to the host."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1854,7 +1853,10 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Metadata endpoint must be reachable",
                 ),
             ],
-            mitre_attack=["T1552"],
+            # T1557 (Adversary-in-the-Middle) for the ARP-spoof primitive;
+            # T1552.005 (Cloud Instance Metadata API) for the goal —
+            # intercepting credentials from the IMDS reply path.
+            mitre_attack=["T1557", "T1552.005"],
             references=[
                 "https://blog.champtar.fr/Metadata_MITM_root_EKS_GKE/",
             ],
@@ -1962,8 +1964,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.INFO_DISCLOSURE,
             severity=Severity.MEDIUM,
             description=(
-                "Sensitive credentials found in environment variables, "
-                "accessible to any process in the container."
+                "Sensitive credentials found in environment variables, accessible to any process in the container."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1972,7 +1973,11 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Environment secrets must be present",
                 ),
             ],
-            mitre_attack=["T1552"],
+            # Env-var secrets are awkward to sub-categorize: T1552.001 is
+            # "Credentials In Files" (close but not quite — env vars live
+            # in /proc/<pid>/environ which is a file-like view of process
+            # memory). Use it as the closest match, plus the parent T1552.
+            mitre_attack=["T1552", "T1552.001"],
             references=[
                 "https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html",
             ],
@@ -1986,8 +1991,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.INFO_DISCLOSURE,
             severity=Severity.HIGH,
             description=(
-                "Cloud metadata service exposes IAM credentials, instance "
-                "identity tokens, and other sensitive data."
+                "Cloud metadata service exposes IAM credentials, instance identity tokens, and other sensitive data."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1997,7 +2001,7 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Cloud metadata must be available",
                 ),
             ],
-            mitre_attack=["T1552"],
+            mitre_attack=["T1552.005"],
             references=[
                 "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
             ],
@@ -2028,7 +2032,9 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Must be running under Kubernetes",
                 ),
             ],
-            mitre_attack=["T1552"],
+            # T1552.007 is the specific sub-technique for Container API
+            # credential exposure (Kubernetes API server, kubelet etc.).
+            mitre_attack=["T1552.007"],
             references=[
                 "https://kubernetes.io/docs/concepts/configuration/secret/",
             ],
@@ -2053,7 +2059,9 @@ def _build_techniques() -> list[EscapeTechnique]:
                     description="Docker socket/API must be reachable",
                 ),
             ],
-            mitre_attack=["T1552"],
+            # T1552.007 (Container API) is the precise sub-technique for
+            # leaking creds via the Docker API.
+            mitre_attack=["T1552.007"],
             references=[
                 "https://docs.docker.com/engine/api/v1.41/#operation/ContainerInspect",
             ],

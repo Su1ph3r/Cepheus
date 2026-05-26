@@ -11,7 +11,6 @@ from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,
     KernelInfo,
-    NetworkInfo,
     RuntimeInfo,
     SecurityProfile,
 )
@@ -309,9 +308,7 @@ def test_version_lte_missing():
 
 def test_any_of_check_passes():
     """any_of returns confidence_if_met when list contains at least one match."""
-    posture = ContainerPosture(
-        capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN", "CAP_NET_RAW"])
-    )
+    posture = ContainerPosture(capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN", "CAP_NET_RAW"]))
     prereq = Prerequisite(
         check_field="capabilities.effective",
         check_type="any_of",
@@ -324,9 +321,7 @@ def test_any_of_check_passes():
 
 def test_any_of_check_fails():
     """any_of returns 0.0 when list contains none of the values."""
-    posture = ContainerPosture(
-        capabilities=CapabilityInfo(effective=["CAP_NET_RAW"])
-    )
+    posture = ContainerPosture(capabilities=CapabilityInfo(effective=["CAP_NET_RAW"]))
     prereq = Prerequisite(
         check_field="capabilities.effective",
         check_type="any_of",
@@ -352,9 +347,7 @@ def test_any_of_non_list_field():
 
 def test_any_of_string_check_value():
     """any_of with non-list check_value returns 0.0 instead of iterating characters."""
-    posture = ContainerPosture(
-        capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN"])
-    )
+    posture = ContainerPosture(capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN"]))
     prereq = Prerequisite(
         check_field="capabilities.effective",
         check_type="any_of",

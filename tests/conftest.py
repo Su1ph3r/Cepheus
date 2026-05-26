@@ -74,9 +74,14 @@ def privileged_posture() -> ContainerPosture:
         kernel=KernelInfo(version="5.10.0-generic", major=5, minor=10, patch=0),
         capabilities=CapabilityInfo(
             effective=[
-                "CAP_SYS_ADMIN", "CAP_NET_RAW", "CAP_SYS_PTRACE",
-                "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_NET_ADMIN",
-                "CAP_SYS_RAWIO", "CAP_SYS_MODULE",
+                "CAP_SYS_ADMIN",
+                "CAP_NET_RAW",
+                "CAP_SYS_PTRACE",
+                "CAP_DAC_OVERRIDE",
+                "CAP_DAC_READ_SEARCH",
+                "CAP_NET_ADMIN",
+                "CAP_SYS_RAWIO",
+                "CAP_SYS_MODULE",
             ],
         ),
         mounts=[

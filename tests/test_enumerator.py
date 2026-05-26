@@ -37,12 +37,12 @@ def test_script_no_bashisms():
     """Basic check that the script avoids common bashisms."""
     content = SCRIPT_PATH.read_text()
     bashisms = [
-        "[[ ",       # bash-only test
+        "[[ ",  # bash-only test
         "declare ",  # bash-only
         "typeset ",  # bash-only
-        "let ",      # bash-only
-        "<<<",       # here-string
-        "function ", # bash-only function declaration
+        "let ",  # bash-only
+        "<<<",  # here-string
+        "function ",  # bash-only function declaration
     ]
     for bashism in bashisms:
         assert bashism not in content, f"Found bashism '{bashism}' in enumerator script"
@@ -96,14 +96,25 @@ def test_valid_json(enumerator_json):
 
 def test_all_top_level_keys_present(enumerator_json):
     expected = {
-        "enumeration_version", "timestamp", "hostname", "kernel",
-        "capabilities", "mounts", "namespaces", "security",
-        "network", "credentials", "runtime", "gpu", "kubernetes",
-        "cgroup_version", "writable_paths", "available_tools",
+        "enumeration_version",
+        "timestamp",
+        "hostname",
+        "kernel",
+        "capabilities",
+        "mounts",
+        "namespaces",
+        "security",
+        "network",
+        "credentials",
+        "runtime",
+        "gpu",
+        "kubernetes",
+        "cgroup_version",
+        "writable_paths",
+        "available_tools",
     }
     assert expected == set(enumerator_json.keys()), (
-        f"Missing: {expected - set(enumerator_json.keys())}, "
-        f"Extra: {set(enumerator_json.keys()) - expected}"
+        f"Missing: {expected - set(enumerator_json.keys())}, Extra: {set(enumerator_json.keys()) - expected}"
     )
 
 
@@ -207,6 +218,11 @@ def test_kubernetes_structure(enumerator_json):
 
 def test_script_has_new_writable_paths():
     content = SCRIPT_PATH.read_text()
-    for path in ["/dev/shm", "/proc/sys/vm", "/sys/kernel/security",
-                 "/run/containerd/containerd.sock", "/var/run/crio/crio.sock"]:
+    for path in [
+        "/dev/shm",
+        "/proc/sys/vm",
+        "/sys/kernel/security",
+        "/run/containerd/containerd.sock",
+        "/var/run/crio/crio.sock",
+    ]:
         assert path in content, f"Expected writable path '{path}' not found in script"

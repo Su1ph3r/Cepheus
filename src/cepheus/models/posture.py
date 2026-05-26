@@ -103,6 +103,7 @@ class RuntimeInfo(BaseModel):
 
 class GpuInfo(BaseModel):
     """GPU device information for escape assessment."""
+
     nvidia_devices: list[str] = Field(default_factory=list)
     nvidia_toolkit_version: str | None = None
     nvidia_driver_version: str | None = None

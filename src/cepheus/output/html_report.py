@@ -171,36 +171,42 @@ def _prepare_context(result: AnalysisResult) -> dict[str, Any]:
     for chain in result.chains:
         steps = []
         for step in chain.steps:
-            steps.append({
-                "name": step.technique.name,
-                "description": step.technique.description,
-                "confidence": f"{step.prerequisite_confidence:.2f}",
-                "poc": step.poc_command or "",
-            })
+            steps.append(
+                {
+                    "name": step.technique.name,
+                    "description": step.technique.description,
+                    "confidence": f"{step.prerequisite_confidence:.2f}",
+                    "poc": step.poc_command or "",
+                }
+            )
             for mid in step.technique.mitre_attack:
                 mitre_map.setdefault(mid, [])
                 if step.technique.name not in mitre_map[mid]:
                     mitre_map[mid].append(step.technique.name)
 
-        chains.append({
-            "id": chain.id,
-            "severity": chain.severity.value,
-            "description": chain.description,
-            "score": f"{chain.composite_score:.4f}",
-            "reliability": f"{chain.reliability_score:.2f}",
-            "stealth": f"{chain.stealth_score:.2f}",
-            "steps": steps,
-        })
+        chains.append(
+            {
+                "id": chain.id,
+                "severity": chain.severity.value,
+                "description": chain.description,
+                "score": f"{chain.composite_score:.4f}",
+                "reliability": f"{chain.reliability_score:.2f}",
+                "stealth": f"{chain.stealth_score:.2f}",
+                "steps": steps,
+            }
+        )
 
     remediations = []
     for rem in result.remediations:
-        remediations.append({
-            "severity": rem.severity.value,
-            "technique_id": rem.technique_id,
-            "current_state": rem.current_state,
-            "recommended_fix": rem.recommended_fix,
-            "runtime_flag": rem.runtime_flag or "",
-        })
+        remediations.append(
+            {
+                "severity": rem.severity.value,
+                "technique_id": rem.technique_id,
+                "current_state": rem.current_state,
+                "recommended_fix": rem.recommended_fix,
+                "runtime_flag": rem.runtime_flag or "",
+            }
+        )
 
     mitre_ids = [{"id": mid, "techniques": ", ".join(names)} for mid, names in sorted(mitre_map.items())]
 
@@ -226,9 +232,7 @@ def generate_html(result: AnalysisResult) -> str:
     try:
         from jinja2 import Environment
     except ImportError:
-        raise ImportError(
-            "jinja2 is required for HTML reports. Install it with: pip install cepheus[html]"
-        )
+        raise ImportError("jinja2 is required for HTML reports. Install it with: pip install cepheus[html]")
 
     from markupsafe import Markup, escape
 

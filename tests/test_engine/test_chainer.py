@@ -5,7 +5,9 @@ from cepheus.models.posture import ContainerPosture
 from cepheus.models.technique import EscapeTechnique, Severity, TechniqueCategory
 
 
-def _tech(id: str, category: TechniqueCategory = TechniqueCategory.CAPABILITY, severity: Severity = Severity.HIGH) -> EscapeTechnique:
+def _tech(
+    id: str, category: TechniqueCategory = TechniqueCategory.CAPABILITY, severity: Severity = Severity.HIGH
+) -> EscapeTechnique:
     return EscapeTechnique(
         id=id,
         name=f"Test {id}",
@@ -99,6 +101,7 @@ def test_max_chain_length_filters():
     # With max_chain_length=2, two-step chains are allowed
     chains_2 = build_combinatorial_chains(matched, posture, max_chain_length=2)
     two_step = [c for c in chains_2 if len(c.steps) == 2]
+    assert len(two_step) > 0, "info+escalation pair should produce a two-step chain when allowed"
 
     # With max_chain_length=1, two-step chains are filtered
     chains_1 = build_combinatorial_chains(matched, posture, max_chain_length=1)

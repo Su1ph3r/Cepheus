@@ -34,7 +34,9 @@ SEVERITY_ORDER = {
 
 class Prerequisite(BaseModel):
     check_field: str = Field(description="Dot-path into ContainerPosture, e.g. 'capabilities.effective'")
-    check_type: str = Field(description="One of: contains, any_of, equals, not_equals, gte, lte, kernel_gte, kernel_lte, kernel_between, exists, not_empty, regex, version_lte")
+    check_type: str = Field(
+        description="One of: contains, any_of, equals, not_equals, gte, lte, kernel_gte, kernel_lte, kernel_between, exists, not_empty, regex, version_lte"
+    )
     check_value: Any = Field(default=None, description="Value to check against")
     confidence_if_met: float = Field(default=1.0, ge=0.0, le=1.0)
     confidence_if_absent: float = Field(default=0.3, ge=0.0, le=1.0)

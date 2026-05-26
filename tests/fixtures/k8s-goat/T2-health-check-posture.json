@@ -1,0 +1,71 @@
+{
+  "enumeration_version": "0.1.0",
+  "timestamp": "2026-05-26T02:12:50Z",
+  "hostname": "health-check-deployment-8f9ff4b7c-2llsj",
+  "kernel": {
+    "version": "6.6.114.1-microsoft-standard-WSL2",
+    "major": 6,
+    "minor": 6,
+    "patch": 114
+  },
+  "capabilities": {
+    "effective": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_LINUX_IMMUTABLE", "CAP_NET_BIND_SERVICE", "CAP_NET_BROADCAST", "CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_IPC_LOCK", "CAP_IPC_OWNER", "CAP_SYS_MODULE", "CAP_SYS_RAWIO", "CAP_SYS_CHROOT", "CAP_SYS_PTRACE", "CAP_SYS_PACCT", "CAP_SYS_ADMIN", "CAP_SYS_BOOT", "CAP_SYS_NICE", "CAP_SYS_RESOURCE", "CAP_SYS_TIME", "CAP_SYS_TTY_CONFIG", "CAP_MKNOD", "CAP_LEASE", "CAP_AUDIT_WRITE", "CAP_AUDIT_CONTROL", "CAP_SETFCAP", "CAP_MAC_OVERRIDE", "CAP_MAC_ADMIN", "CAP_SYSLOG", "CAP_WAKE_ALARM", "CAP_BLOCK_SUSPEND", "CAP_AUDIT_READ", "CAP_PERFMON", "CAP_BPF", "CAP_CHECKPOINT_RESTORE"],
+    "bounding": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_LINUX_IMMUTABLE", "CAP_NET_BIND_SERVICE", "CAP_NET_BROADCAST", "CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_IPC_LOCK", "CAP_IPC_OWNER", "CAP_SYS_MODULE", "CAP_SYS_RAWIO", "CAP_SYS_CHROOT", "CAP_SYS_PTRACE", "CAP_SYS_PACCT", "CAP_SYS_ADMIN", "CAP_SYS_BOOT", "CAP_SYS_NICE", "CAP_SYS_RESOURCE", "CAP_SYS_TIME", "CAP_SYS_TTY_CONFIG", "CAP_MKNOD", "CAP_LEASE", "CAP_AUDIT_WRITE", "CAP_AUDIT_CONTROL", "CAP_SETFCAP", "CAP_MAC_OVERRIDE", "CAP_MAC_ADMIN", "CAP_SYSLOG", "CAP_WAKE_ALARM", "CAP_BLOCK_SUSPEND", "CAP_AUDIT_READ", "CAP_PERFMON", "CAP_BPF", "CAP_CHECKPOINT_RESTORE"],
+    "permitted": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_DAC_READ_SEARCH", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID", "CAP_SETPCAP", "CAP_LINUX_IMMUTABLE", "CAP_NET_BIND_SERVICE", "CAP_NET_BROADCAST", "CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_IPC_LOCK", "CAP_IPC_OWNER", "CAP_SYS_MODULE", "CAP_SYS_RAWIO", "CAP_SYS_CHROOT", "CAP_SYS_PTRACE", "CAP_SYS_PACCT", "CAP_SYS_ADMIN", "CAP_SYS_BOOT", "CAP_SYS_NICE", "CAP_SYS_RESOURCE", "CAP_SYS_TIME", "CAP_SYS_TTY_CONFIG", "CAP_MKNOD", "CAP_LEASE", "CAP_AUDIT_WRITE", "CAP_AUDIT_CONTROL", "CAP_SETFCAP", "CAP_MAC_OVERRIDE", "CAP_MAC_ADMIN", "CAP_SYSLOG", "CAP_WAKE_ALARM", "CAP_BLOCK_SUSPEND", "CAP_AUDIT_READ", "CAP_PERFMON", "CAP_BPF", "CAP_CHECKPOINT_RESTORE"]
+  },
+  "mounts": [{"source": "overlay", "destination": "/", "fstype": "overlay", "options": ["rw", "relatime", "lowerdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/205/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/204/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/203/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/202/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/201/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/200/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/199/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/198/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/197/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/196/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/195/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/194/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/193/fs", "upperdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/206/fs", "workdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/206/work", "uuid=on"]}, {"source": "proc", "destination": "/proc", "fstype": "proc", "options": ["rw", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "tmpfs", "destination": "/dev", "fstype": "tmpfs", "options": ["rw", "nosuid", "size=65536k", "mode=755"]}, {"source": "devpts", "destination": "/dev/pts", "fstype": "devpts", "options": ["rw", "nosuid", "noexec", "relatime", "gid=5", "mode=620", "ptmxmode=666"]}, {"source": "mqueue", "destination": "/dev/mqueue", "fstype": "mqueue", "options": ["rw", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "sysfs", "destination": "/sys", "fstype": "sysfs", "options": ["ro", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "cgroup", "destination": "/sys/fs/cgroup", "fstype": "cgroup2", "options": ["rw", "nosuid", "nodev", "noexec", "relatime"]}, {"source": "/dev/sde", "destination": "/run/docker.sock", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/hosts", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/dev/termination-log", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/hostname", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/etc/resolv.conf", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "shm", "destination": "/dev/shm", "fstype": "tmpfs", "options": ["rw", "nosuid", "nodev", "noexec", "relatime", "size=65536k"]}, {"source": "/dev/sde", "destination": "/custom/containerd/containerd.sock", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/run/docker.sock", "fstype": "ext4", "options": ["rw", "relatime"]}, {"source": "tmpfs", "destination": "/run/secrets/kubernetes.io/serviceaccount", "fstype": "tmpfs", "options": ["ro", "relatime", "size=49223648k", "noswap"]}, {"source": "proc", "destination": "/mnt/host", "fstype": "proc", "options": ["rw", "relatime"]}, {"source": "/dev/sde", "destination": "/mnt/host", "fstype": "ext4", "options": ["rw", "relatime"]}],
+  "namespaces": {
+    "pid": true,
+    "net": true,
+    "mnt": true,
+    "user": false,
+    "uts": true,
+    "ipc": true,
+    "cgroup": true
+  },
+  "security": {
+    "seccomp": "filtering",
+    "apparmor": "kernel",
+    "selinux": null
+  },
+  "network": {
+    "interfaces": ["eth0", "lo"],
+    "can_reach_metadata": false,
+    "can_reach_docker_sock": false,
+    "can_reach_containerd_sock": false,
+    "can_reach_crio_sock": false,
+    "listening_ports": [80]
+  },
+  "credentials": {
+    "service_account_token": true,
+    "environment_secrets": [],
+    "cloud_metadata_available": false
+  },
+  "runtime": {
+    "runtime": "containerd",
+    "runtime_version": null,
+    "orchestrator": "kubernetes",
+    "privileged": true,
+    "pid_one": "health-check",
+    "runc_version": null,
+    "sandbox_runtime": null
+  },
+  "gpu": {
+    "nvidia_devices": [],
+    "nvidia_toolkit_version": null,
+    "nvidia_driver_version": null
+  },
+  "kubernetes": {
+    "rbac_permissions": ["selfsubjectrulesreview/available"],
+    "pod_security_standard": "privileged",
+    "has_sidecar": false,
+    "sidecar_type": null,
+    "node_access_indicators": [],
+    "namespace": "default",
+    "pod_name": "health-check-deployment-8f9ff4b7c-2llsj",
+    "node_name": null
+  },
+  "cgroup_version": 2,
+  "writable_paths": ["/proc/sysrq-trigger", "/proc/sys/kernel/core_pattern", "/sys/fs/cgroup", "/dev", "/dev/shm", "/var/run/docker.sock", "/proc/self/fd"],
+  "available_tools": ["curl", "wget", "python3", "gcc", "make", "mount", "umount", "nsenter", "perl", "capsh", "apt", "dpkg", "bash", "sh", "tar", "gzip", "awk", "sed", "grep", "find", "xargs"]
+}

@@ -41,7 +41,7 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
     verdict = Text("IMPROVED", style="bold green") if diff.improved else Text("REGRESSED", style="bold red")
 
     summary_lines = [
-        f"                   BEFORE    AFTER",
+        "                   BEFORE    AFTER",
         f"  Total chains:    {diff.before_summary.total_chains:<10}{diff.after_summary.total_chains}",
         f"  Critical chains: {diff.before_summary.critical_chains:<10}{diff.after_summary.critical_chains}",
         f"  High chains:     {diff.before_summary.high_chains:<10}{diff.after_summary.high_chains}",

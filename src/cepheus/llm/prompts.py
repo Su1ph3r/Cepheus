@@ -27,8 +27,9 @@ def _format_posture(posture: ContainerPosture) -> str:
     """Summarize the container posture into a compact text block."""
     lines: list[str] = []
 
-    lines.append(f"Kernel: {posture.kernel.version} "
-                 f"({posture.kernel.major}.{posture.kernel.minor}.{posture.kernel.patch})")
+    lines.append(
+        f"Kernel: {posture.kernel.version} ({posture.kernel.major}.{posture.kernel.minor}.{posture.kernel.patch})"
+    )
     lines.append(f"Hostname: {posture.hostname}")
     lines.append(f"Cgroup version: {posture.cgroup_version}")
 
@@ -54,18 +55,25 @@ def _format_posture(posture: ContainerPosture) -> str:
 
     # Namespaces
     ns = posture.namespaces
-    shared = [n for n, active in [
-        ("pid", ns.pid), ("net", ns.net), ("mnt", ns.mnt),
-        ("user", ns.user), ("uts", ns.uts), ("ipc", ns.ipc),
-        ("cgroup", ns.cgroup),
-    ] if not active]
+    shared = [
+        n
+        for n, active in [
+            ("pid", ns.pid),
+            ("net", ns.net),
+            ("mnt", ns.mnt),
+            ("user", ns.user),
+            ("uts", ns.uts),
+            ("ipc", ns.ipc),
+            ("cgroup", ns.cgroup),
+        ]
+        if not active
+    ]
     if shared:
         lines.append(f"Shared namespaces (not isolated): {', '.join(shared)}")
 
     # Runtime
     rt = posture.runtime
-    lines.append(f"Runtime: {rt.runtime}"
-                 + (f" {rt.runtime_version}" if rt.runtime_version else ""))
+    lines.append(f"Runtime: {rt.runtime}" + (f" {rt.runtime_version}" if rt.runtime_version else ""))
     if rt.orchestrator:
         lines.append(f"Orchestrator: {rt.orchestrator}")
     if rt.privileged:
@@ -108,15 +116,16 @@ def _format_chains(chains: list[EscapeChain]) -> str:
 
     lines: list[str] = []
     for i, chain in enumerate(chains, 1):
-        lines.append(f"Chain {i}: {chain.id} (severity={chain.severity.value}, "
-                     f"composite={chain.composite_score:.2f}, "
-                     f"confidence={chain.confidence_score:.2f})")
+        lines.append(
+            f"Chain {i}: {chain.id} (severity={chain.severity.value}, "
+            f"composite={chain.composite_score:.2f}, "
+            f"confidence={chain.confidence_score:.2f})"
+        )
         if chain.description:
             lines.append(f"  Description: {chain.description}")
         for j, step in enumerate(chain.steps, 1):
             t = step.technique
-            lines.append(f"  Step {j}: [{t.id}] {t.name} "
-                         f"(category={t.category.value}, severity={t.severity.value})")
+            lines.append(f"  Step {j}: [{t.id}] {t.name} (category={t.category.value}, severity={t.severity.value})")
             if step.poc_command:
                 lines.append(f"    PoC: {step.poc_command}")
     return "\n".join(lines)
@@ -157,8 +166,7 @@ def build_summary_prompt(result: AnalysisResult) -> str:
     for r in result.remediations:
         remediation_lines.append(
             f"- [{r.severity.value}] {r.technique_id}: {r.current_state} "
-            f"-> {r.recommended_fix}"
-            + (f" (flag: {r.runtime_flag})" if r.runtime_flag else "")
+            f"-> {r.recommended_fix}" + (f" (flag: {r.runtime_flag})" if r.runtime_flag else "")
         )
     remediation_text = "\n".join(remediation_lines) if remediation_lines else "None"
 

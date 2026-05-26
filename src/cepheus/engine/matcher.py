@@ -26,12 +26,12 @@ _DISTRO_KERNEL_PATTERNS: list[tuple[str, str]] = [
     # (pattern, tag) — pattern is matched case-insensitively against kernel.version
     ("microsoft-standard-WSL2", "wsl2"),
     ("microsoft-standard", "wsl"),
-    ("-aws",   "aws"),
+    ("-aws", "aws"),
     ("-azure", "azure"),
-    ("-gke",   "gke"),
-    ("-gcp",   "gcp"),
+    ("-gke", "gke"),
+    ("-gcp", "gcp"),
     ("-oracle", "oracle"),
-    ("-ibm",   "ibm"),
+    ("-ibm", "ibm"),
     (".amzn1.", "amazon-linux-1"),
     (".amzn2.", "amazon-linux-2"),
     (".amzn2023.", "amazon-linux-2023"),
@@ -243,9 +243,7 @@ def match_technique(
     avg_confidence = sum(confidences) / len(confidences)
 
     # Kernel-only confidence cap
-    only_kernel_prereqs = all(
-        p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites
-    )
+    only_kernel_prereqs = all(p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites)
     if only_kernel_prereqs:
         if config is None:
             config = CepheusConfig()

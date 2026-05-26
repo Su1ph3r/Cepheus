@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from cepheus.config import CepheusConfig
 from cepheus.models.posture import ContainerPosture
-from cepheus.models.technique import Severity, SEVERITY_ORDER
+from cepheus.models.technique import Severity
 
 
 class TechniqueDelta(BaseModel):
@@ -56,11 +56,7 @@ def _build_summary(result) -> ScoreSummary:
     critical_chains = sum(1 for c in result.chains if c.severity == Severity.CRITICAL)
     high_chains = sum(1 for c in result.chains if c.severity == Severity.HIGH)
     max_score = max((c.composite_score for c in result.chains), default=0.0)
-    avg_score = (
-        sum(c.composite_score for c in result.chains) / total_chains
-        if total_chains > 0
-        else 0.0
-    )
+    avg_score = sum(c.composite_score for c in result.chains) / total_chains if total_chains > 0 else 0.0
     return ScoreSummary(
         total_chains=total_chains,
         critical_chains=critical_chains,
@@ -70,9 +66,7 @@ def _build_summary(result) -> ScoreSummary:
     )
 
 
-def _compare_posture_fields(
-    before: ContainerPosture, after: ContainerPosture
-) -> list[PostureDelta]:
+def _compare_posture_fields(before: ContainerPosture, after: ContainerPosture) -> list[PostureDelta]:
     """Compare key posture fields and return deltas for fields that changed."""
     deltas: list[PostureDelta] = []
 

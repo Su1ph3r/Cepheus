@@ -1,7 +1,6 @@
 """Tests for the LLM client."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -13,6 +12,7 @@ def test_llm_client_import_error():
     with patch.dict("sys.modules", {"litellm": None}):
         from cepheus.llm.client import LLMClient
         from cepheus.config import CepheusConfig
+
         with pytest.raises(ImportError):
             LLMClient(CepheusConfig())
 
@@ -32,6 +32,7 @@ def test_llm_client_success(sample_posture, sample_chain):
 
     with patch.dict("sys.modules", {"litellm": mock_litellm}):
         from cepheus.llm.client import LLMClient
+
         config = CepheusConfig()
         client = LLMClient(config)
         result = client.analyze_posture_sync(sample_posture, [sample_chain])
@@ -49,6 +50,7 @@ def test_llm_client_failure_graceful(sample_posture, sample_chain):
 
     with patch.dict("sys.modules", {"litellm": mock_litellm}):
         from cepheus.llm.client import LLMClient
+
         config = CepheusConfig()
         client = LLMClient(config)
         result = client.analyze_posture_sync(sample_posture, [sample_chain])

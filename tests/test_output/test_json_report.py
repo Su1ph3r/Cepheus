@@ -1,7 +1,6 @@
 """Tests for the JSON report output."""
 
 import json
-from pathlib import Path
 
 from cepheus.output.json_report import generate_report, write_report
 

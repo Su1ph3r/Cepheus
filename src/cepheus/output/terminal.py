@@ -108,13 +108,15 @@ def print_analysis_result(result: AnalysisResult) -> None:
 
 def print_chain(chain: EscapeChain) -> None:
     """Print detailed view of a single escape chain."""
-    console.print(Panel(
-        f"[bold]Chain ID:[/bold] {chain.id}\n"
-        f"[bold]Score:[/bold]    {chain.composite_score:.4f}\n"
-        f"[bold]Severity:[/bold] {chain.severity.value.upper()}",
-        title=f"[bold]{chain.description}[/bold]",
-        border_style=SEVERITY_COLORS.get(chain.severity.value, "white"),
-    ))
+    console.print(
+        Panel(
+            f"[bold]Chain ID:[/bold] {chain.id}\n"
+            f"[bold]Score:[/bold]    {chain.composite_score:.4f}\n"
+            f"[bold]Severity:[/bold] {chain.severity.value.upper()}",
+            title=f"[bold]{chain.description}[/bold]",
+            border_style=SEVERITY_COLORS.get(chain.severity.value, "white"),
+        )
+    )
 
     for i, step in enumerate(chain.steps, 1):
         console.print(f"\n  [bold]Step {i}:[/bold] {step.technique.name}")
