@@ -28,6 +28,121 @@ list_append() {
 }
 
 # ---------------------------------------------------------------------------
+# TCP reachability probe
+# ---------------------------------------------------------------------------
+#
+# Returns 0 (true) if host:port is TCP-reachable within $3 seconds (default
+# 1s), non-zero otherwise. Used to confirm whether vulnerable components
+# (etcd, kubelet API, ingress webhooks) are actually reachable from this
+# pod, not just hypothetically "in the cluster". Tries multiple probe
+# methods because distroless / busybox containers may lack any one of
+# them — graceful degradation when nothing works (returns non-zero).
+#
+# Usage:
+#   if tcp_probe etcd.kube-system.svc 2379; then ... fi
+#   if tcp_probe 127.0.0.1 10250 2; then ... fi   # 2-second timeout
+
+tcp_probe() {
+    _host=$1
+    _port=$2
+    _to=${3:-1}
+    # Methods are ordered by timeout reliability. Each method has an
+    # explicit per-attempt timeout so a single hung probe can't blow
+    # past kubectl exec's outer deadline (default 60s).
+    #
+    # Method 1: nc (netcat) with -z (scan only) + -w (timeout) — both
+    # busybox and OpenBSD nc support this. Preferred when present.
+    if command -v nc >/dev/null 2>&1; then
+        if nc -z -w "$_to" "$_host" "$_port" >/dev/null 2>&1; then
+            return 0
+        fi
+        return 1
+    fi
+    # Method 2: curl on bare TCP. `--connect-timeout` bounds DNS+SYN,
+    # `--max-time` bounds the whole call. Works in every K8s pod that
+    # has curl, which is most of them.
+    if command -v curl >/dev/null 2>&1; then
+        if curl -sf --connect-timeout "$_to" --max-time "$_to" \
+            "telnet://$_host:$_port" >/dev/null 2>&1; then
+            return 0
+        fi
+        return 1
+    fi
+    # Method 3: python3 socket — present on most K8s workloads.
+    if command -v python3 >/dev/null 2>&1; then
+        if python3 -c "import socket,sys; s=socket.socket(); s.settimeout($_to); s.connect(('$_host',$_port)); s.close()" >/dev/null 2>&1; then
+            return 0
+        fi
+        return 1
+    fi
+    # Method 4: last-resort bash /dev/tcp. NO native timeout — fall
+    # through only if everything else is missing. Wrap with `timeout`
+    # if available; otherwise skip rather than risk a 60s OS-level
+    # connect timeout.
+    if command -v bash >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+        if timeout "$_to" bash -c "exec 3<>/dev/tcp/$_host/$_port" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Kubernetes API call helper
+# ---------------------------------------------------------------------------
+#
+# Make an authenticated request to the in-cluster K8s API using the pod's
+# SA token. Echoes the response body on stdout, returns non-zero on
+# failure (missing token, no curl, HTTP error, timeout). Path argument
+# should start with /; full URL is constructed against $KUBERNETES_SERVICE_HOST.
+#
+# Token is passed via curl's -H @file (not -H "Authorization: ..." inline)
+# to avoid leaking it via `ps aux` while curl is running.
+#
+# Usage:
+#   resp=$(k8s_api_get /api/v1/namespaces/$NS/pods/$POD)
+#   resp=$(k8s_api_post /apis/.../selfsubjectrulesreviews "$body")
+
+_k8s_api_call() {
+    _method=$1
+    _path=$2
+    _body=${3:-}
+    [ -z "${KUBERNETES_SERVICE_HOST:-}" ] && return 1
+    command -v curl >/dev/null 2>&1 || return 1
+    [ -f /var/run/secrets/kubernetes.io/serviceaccount/token ] || return 1
+
+    _token=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || true)
+    [ -n "$_token" ] || return 1
+
+    _hdr_file=$(mktemp /tmp/_cepheus_hdr_XXXXXX 2>/dev/null || echo "/tmp/_cepheus_hdr$$")
+    printf 'Authorization: Bearer %s' "$_token" > "$_hdr_file"
+    chmod 600 "$_hdr_file" 2>/dev/null
+
+    _cacert="-k"
+    if [ -f /var/run/secrets/kubernetes.io/serviceaccount/ca.crt ]; then
+        _cacert="--cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    fi
+
+    _port=${KUBERNETES_SERVICE_PORT:-443}
+    _url="https://${KUBERNETES_SERVICE_HOST}:${_port}${_path}"
+    _curl_rc=0
+    if [ "$_method" = "GET" ]; then
+        # shellcheck disable=SC2086  # _cacert holds two tokens by design
+        curl -sf --max-time 3 $_cacert -H @"$_hdr_file" "$_url" 2>/dev/null || _curl_rc=$?
+    else
+        # shellcheck disable=SC2086
+        curl -sf --max-time 3 $_cacert -H @"$_hdr_file" \
+            -X "$_method" -H "Content-Type: application/json" \
+            -d "$_body" "$_url" 2>/dev/null || _curl_rc=$?
+    fi
+    rm -f "$_hdr_file"
+    return $_curl_rc
+}
+
+k8s_api_get()  { _k8s_api_call GET  "$1"; }
+k8s_api_post() { _k8s_api_call POST "$1" "$2"; }
+
+# ---------------------------------------------------------------------------
 # Timestamp
 # ---------------------------------------------------------------------------
 
@@ -333,6 +448,73 @@ collect_network() {
         CAN_REACH_CRIO_SOCK="true"
     fi
 
+    # ── component-presence TCP probes ────────────────────────────────
+    # These populate fields the matcher (v0.3.1+) uses to gate techniques
+    # on actual reachability. They are best-effort; failures or missing
+    # probe tools leave the field at the model default (None / False).
+    CAN_REACH_ETCD="null"
+    CAN_REACH_KUBELET_API="null"
+    COMPONENT_REACHABILITY=""
+
+    if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        # Only run cluster-internal probes when there's an API server. On
+        # non-K8s hosts the etcd/kubelet probes would be noise.
+
+        # etcd — typical control-plane port 2379. Try several locations:
+        # the API-server host (often the same node on single-node kind /
+        # k3s clusters) and the in-cluster `etcd` service.
+        if tcp_probe "${KUBERNETES_SERVICE_HOST}" 2379 \
+            || tcp_probe etcd.kube-system.svc.cluster.local 2379; then
+            CAN_REACH_ETCD="true"
+        else
+            CAN_REACH_ETCD="false"
+        fi
+
+        # kubelet API — listens on the node IP on 10250 (auth) and 10255
+        # (legacy read-only, often disabled). The node IP is the default
+        # gateway from inside the pod's network namespace.
+        _node_ip=""
+        if [ -f /proc/net/route ]; then
+            # Field 3 is gateway in hex, little-endian. Pick the line whose
+            # destination is 00000000 (default route).
+            _hex_gw=$(awk '$2=="00000000" {print $3; exit}' /proc/net/route 2>/dev/null)
+            if [ -n "$_hex_gw" ] && [ ${#_hex_gw} -eq 8 ]; then
+                # Convert little-endian hex (e.g. 010110AC) to dotted quad
+                # by reading byte pairs right-to-left.
+                _o1=$(printf '%d' "0x${_hex_gw##??????}")
+                _o2=$(printf '%d' "0x$(echo "$_hex_gw" | cut -c5-6)")
+                _o3=$(printf '%d' "0x$(echo "$_hex_gw" | cut -c3-4)")
+                _o4=$(printf '%d' "0x$(echo "$_hex_gw" | cut -c1-2)")
+                _node_ip="$_o1.$_o2.$_o3.$_o4"
+            fi
+        fi
+        if [ -n "$_node_ip" ] && tcp_probe "$_node_ip" 10250; then
+            CAN_REACH_KUBELET_API="true"
+        else
+            CAN_REACH_KUBELET_API="false"
+        fi
+
+        # Generic component reachability map — keyed by short component
+        # name, value true/false. Probes the standard in-cluster Service
+        # endpoints for components whose CVEs Cepheus tracks. Failures
+        # are recorded as false so the matcher can distinguish "probed
+        # and absent" from "never probed".
+        for _comp in \
+            "ingress-nginx-controller.ingress-nginx.svc.cluster.local:443:ingress-nginx" \
+            "argocd-server.argocd.svc.cluster.local:443:argocd" \
+            "harbor.harbor.svc.cluster.local:443:harbor" \
+            "buildkitd.buildkit.svc.cluster.local:1234:buildkit"; do
+            _h=$(echo "$_comp" | cut -d: -f1)
+            _p=$(echo "$_comp" | cut -d: -f2)
+            _name=$(echo "$_comp" | cut -d: -f3)
+            if tcp_probe "$_h" "$_p"; then
+                COMPONENT_REACHABILITY=$(list_append "$COMPONENT_REACHABILITY" "$(json_str "$_name"): true")
+            else
+                COMPONENT_REACHABILITY=$(list_append "$COMPONENT_REACHABILITY" "$(json_str "$_name"): false")
+            fi
+        done
+    fi
+
     # Listening ports from /proc/net/tcp
     LISTENING_PORTS=""
     if [ -f /proc/net/tcp ]; then
@@ -464,10 +646,45 @@ collect_runtime() {
         fi
     fi
 
-    # runc version (always attempt)
+    # runc version detection — several fallbacks because most workload
+    # containers don't have runc on PATH. The v0.3.1 matcher uses this
+    # to gate CVE-2019-5736 (runc proc/self/exe overwrite) on a real
+    # version comparison instead of firing speculatively.
+    RUNC_VERSION=""
+    # Method 1: runc directly on PATH (debug containers, build images).
     if command -v runc >/dev/null 2>&1; then
         RUNC_VERSION=$(runc --version 2>/dev/null | head -1 | awk '{print $NF}' || true)
     fi
+    # Method 2: /proc/1/exe sometimes resolves to the runc binary itself
+    # in pods spawned by older runtimes. Cheap to check.
+    if [ -z "$RUNC_VERSION" ] && [ -r /proc/1/exe ]; then
+        _exe=$(readlink /proc/1/exe 2>/dev/null || true)
+        case "$_exe" in
+            *runc*)
+                RUNC_VERSION=$("$_exe" --version 2>/dev/null | head -1 | awk '{print $NF}' || true)
+                ;;
+        esac
+    fi
+    # Method 3: scan common host-bind-mounted paths (privileged + hostPath
+    # pods often have the host's /usr/bin or /usr/sbin available).
+    # IMPORTANT: gate on `timeout` because host binaries executed from
+    # inside a container may need shared libraries the container's
+    # mount namespace doesn't provide. Without the timeout guard,
+    # `--version` can hang for the OS process default (60+ s per attempt).
+    if [ -z "$RUNC_VERSION" ] && command -v timeout >/dev/null 2>&1; then
+        for _p in /usr/bin/runc /usr/sbin/runc /usr/local/bin/runc \
+                  /host/usr/bin/runc /host-system/usr/bin/runc \
+                  /host-root/usr/bin/runc; do
+            if [ -x "$_p" ]; then
+                RUNC_VERSION=$(timeout 1 "$_p" --version 2>/dev/null | head -1 | awk '{print $NF}' || true)
+                [ -n "$RUNC_VERSION" ] && break
+            fi
+        done
+    fi
+    # Strip the leading "v" if present (some runc builds report "v1.1.10").
+    case "$RUNC_VERSION" in
+        v[0-9]*) RUNC_VERSION=${RUNC_VERSION#v} ;;
+    esac
 
     # Orchestrator
     if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
@@ -571,6 +788,9 @@ collect_kubernetes() {
     K8S_NAMESPACE=""
     K8S_POD_NAME=""
     K8S_NODE_NAME=""
+    # v0.3.3 additions — populated by SA-token-driven probes below.
+    K8S_CLUSTER_COMPONENTS=""
+    K8S_CLUSTER_COMPONENTS_PROBED="false"
 
     # Only collect if running under Kubernetes
     if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
@@ -626,6 +846,84 @@ collect_kubernetes() {
             if [ -n "$_api_resp" ]; then
                 K8S_RBAC_PERMS=$(list_append "$K8S_RBAC_PERMS" "\"selfsubjectrulesreview/available\"")
             fi
+        fi
+    fi
+
+    # ── Cluster-component scan (v0.3.3) ───────────────────────────────
+    # Use the SA token to list pods cluster-wide and detect known
+    # components by image-prefix or label. Populates
+    # `kubernetes.cluster_components` so the matcher can gate CVE
+    # techniques (IngressNightmare etc.) on "is this component actually
+    # deployed?" instead of "is this a Kubernetes cluster?".
+    #
+    # Graceful degradation:
+    #   - cluster_components_probed=true   → list is authoritative
+    #   - cluster_components_probed=false  → couldn't probe; matcher
+    #     should treat as "unknown" via confidence_if_absent.
+    _comp_resp=$(k8s_api_get "/api/v1/pods?limit=200" 2>/dev/null || true)
+    if [ -n "$_comp_resp" ]; then
+        K8S_CLUSTER_COMPONENTS_PROBED="true"
+        # POSIX shell can't JSON-parse, so we substring-match on known
+        # image prefixes. False positives here would over-trigger CVE
+        # matches — keep the patterns specific. False negatives keep
+        # the current "drop on absence" behaviour.
+        for _pair in \
+            "registry.k8s.io/ingress-nginx:ingress-nginx" \
+            "k8s.gcr.io/ingress-nginx:ingress-nginx" \
+            "docker.io/argoproj/argocd:argocd" \
+            "quay.io/argoproj/argocd:argocd" \
+            "goharbor/harbor:harbor" \
+            "moby/buildkit:buildkit" \
+            "docker/buildkit:buildkit" \
+            "falcosecurity/falco:falco" \
+            "registry.k8s.io/etcd:etcd" \
+            "tigera/operator:calico" \
+            "cilium/cilium:cilium"; do
+            _pattern=${_pair%:*}
+            _name=${_pair##*:}
+            case "$_comp_resp" in
+                *"\"image\":\"$_pattern"*|*"$_pattern/"*)
+                    K8S_CLUSTER_COMPONENTS=$(list_append "$K8S_CLUSTER_COMPONENTS" "$(json_str "$_name")")
+                    ;;
+            esac
+        done
+    fi
+
+    # ── K8s API self-introspection (v0.3.3) ───────────────────────────
+    # When the SA token grants `get pods` on its own namespace, query
+    # the API server for the authoritative pod spec and OVERRIDE the
+    # heuristic-derived namespaces.{pid,ipc,net} and runtime.privileged
+    # values. The inode-comparison heuristics are unreliable on
+    # kind/WSL/some CNI plugins; the API answer is ground truth.
+    if [ -n "$K8S_NAMESPACE" ] && [ -n "$K8S_POD_NAME" ]; then
+        _pod_resp=$(k8s_api_get "/api/v1/namespaces/$K8S_NAMESPACE/pods/$K8S_POD_NAME" 2>/dev/null || true)
+        if [ -n "$_pod_resp" ]; then
+            # Extract spec.hostPID / hostIPC / hostNetwork / privileged
+            # via simple substring matching. Each appears at most once
+            # in the response. Missing field means false (K8s default).
+            case "$_pod_resp" in
+                *'"hostPID":true'*) NS_PID="false" ;;  # NS_PID=false means PID ns shared with host
+                *'"hostPID":false'*) NS_PID="true" ;;
+            esac
+            case "$_pod_resp" in
+                *'"hostIPC":true'*) NS_IPC="false" ;;
+                *'"hostIPC":false'*) NS_IPC="true" ;;
+            esac
+            case "$_pod_resp" in
+                *'"hostNetwork":true'*) NS_NET="false" ;;
+                *'"hostNetwork":false'*) NS_NET="true" ;;
+            esac
+            # privileged: search for the first occurrence of "privileged":true
+            # within a securityContext block. Conservative — keep the cap-set
+            # heuristic's True (set above by collect_runtime) and only escalate
+            # from False to True when the API confirms.
+            case "$_pod_resp" in
+                *'"privileged":true'*)
+                    if [ "$PRIVILEGED" = "false" ]; then
+                        PRIVILEGED="true"
+                    fi
+                    ;;
+            esac
         fi
     fi
 
@@ -820,7 +1118,13 @@ main() {
     printf '    "can_reach_docker_sock": %s,\n' "$(json_bool "$CAN_REACH_DOCKER_SOCK")"
     printf '    "can_reach_containerd_sock": %s,\n' "$(json_bool "$CAN_REACH_CONTAINERD_SOCK")"
     printf '    "can_reach_crio_sock": %s,\n' "$(json_bool "$CAN_REACH_CRIO_SOCK")"
-    printf '    "listening_ports": [%s]\n' "$LISTENING_PORTS"
+    printf '    "listening_ports": [%s],\n' "$LISTENING_PORTS"
+    # New in v0.3.3 — populated when KUBERNETES_SERVICE_HOST is set.
+    # Schema treats null as "not probed" (analyzer reads as None) so
+    # techniques degrade gracefully on non-K8s containers.
+    printf '    "can_reach_etcd": %s,\n' "$CAN_REACH_ETCD"
+    printf '    "can_reach_kubelet_api": %s,\n' "$CAN_REACH_KUBELET_API"
+    printf '    "component_reachability": {%s}\n' "$COMPONENT_REACHABILITY"
     printf '  },\n'
 
     # credentials
@@ -857,7 +1161,10 @@ main() {
     printf '    "node_access_indicators": [%s],\n' "$K8S_NODE_ACCESS"
     printf '    "namespace": %s,\n' "$(json_str_or_null "$K8S_NAMESPACE")"
     printf '    "pod_name": %s,\n' "$(json_str_or_null "$K8S_POD_NAME")"
-    printf '    "node_name": %s\n' "$(json_str_or_null "$K8S_NODE_NAME")"
+    printf '    "node_name": %s,\n' "$(json_str_or_null "$K8S_NODE_NAME")"
+    # v0.3.3 additions
+    printf '    "cluster_components": [%s],\n' "$K8S_CLUSTER_COMPONENTS"
+    printf '    "cluster_components_probed": %s\n' "$(json_bool "$K8S_CLUSTER_COMPONENTS_PROBED")"
     printf '  },\n'
 
     printf '  "cgroup_version": %s,\n' "$(json_int "$CGROUP_VERSION")"

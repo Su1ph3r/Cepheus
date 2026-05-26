@@ -7,7 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.2] - 2026-05-26
+## [0.3.3] - 2026-05-26
+
+Finishes the precision-overhaul work started in v0.3.1: wires up the
+enumerator probes that the matcher already consumes. v0.3.1 added
+schema fields (`network.can_reach_etcd`, `kubernetes.cluster_components`,
+`runtime.runc_version`, etc.) and matcher gates that read them, but the
+enumerator wasn't yet populating them — every CVE technique gated on
+those fields would drop with `confidence_if_absent`. This release fills
+the gap so techniques can MATCH on confirmed evidence, not just DROP on
+missing data.
+
+Behavioural change on the K8s Goat benchmark: **none** (the benchmark's
+SA tokens lack list-pods RBAC, so the new probes still return defaults;
+matched-technique sets are identical and the precision benchmark stays
+at 100% precision / 100% recall). On clusters where the pod's SA has
+list-pods OR the components are TCP-reachable, recall improves —
+techniques like `cve_2025_1974` (IngressNightmare) now match when
+ingress-nginx is actually deployed instead of being permanently
+suppressed.
+
+### Added
+
+- **TCP-reachability probes in the enumerator** — new `tcp_probe`
+  shell helper with four backend methods (nc → curl → python3 → bash
+  /dev/tcp, each gated on availability AND an explicit timeout so a
+  single hung probe can't blow the enumerator deadline). Used to
+  populate:
+  - `network.can_reach_etcd` (probes `$KUBERNETES_SERVICE_HOST:2379`
+    and `etcd.kube-system.svc.cluster.local:2379`)
+  - `network.can_reach_kubelet_api` (probes node default-gateway IP
+    on port 10250)
+  - `network.component_reachability` map — TCP probes well-known
+    service VIPs for ingress-nginx, argocd, harbor, buildkit
+- **Reusable K8s API helper** — `k8s_api_get` / `k8s_api_post`
+  functions wrap the SA-token + ca.crt + curl boilerplate; the
+  existing SelfSubjectRulesReview block was already doing this
+  inline. Token is passed via `-H @file` not inline so it doesn't
+  leak via `ps aux`.
+- **`kubernetes.cluster_components` population** — when the SA can
+  `list pods`, the enumerator queries `/api/v1/pods?limit=200` and
+  detects known component image-prefixes (ingress-nginx, argocd,
+  harbor, buildkit, falco, calico, cilium). When the API call is
+  forbidden, the enumerator falls back to deriving `cluster_components`
+  from successful entries in `component_reachability` — so recall
+  improves even without list-pods RBAC, as long as the component is
+  TCP-reachable.
+- **`kubernetes.cluster_components_probed: bool`** — true iff the
+  K8s API list-pods call succeeded.
+- **K8s API self-introspection** — when the SA can `get pods` on its
+  own namespace, the enumerator queries
+  `/api/v1/namespaces/$NS/pods/$POD_NAME` and reads `spec.hostPID`,
+  `spec.hostIPC`, `spec.hostNetwork`, and
+  `containers[].securityContext.privileged`. These are OVERRIDES on
+  the inode-comparison heuristics (which are unreliable on kind / k3s /
+  some CNI plugins). When the API call fails, the heuristics
+  remain in effect.
+
+### Changed
+
+- **`runtime.runc_version` detection improved** — was only `command
+  -v runc` lookup; now also resolves `/proc/1/exe` and scans common
+  host-bind-mounted paths (`/host/usr/bin/runc`, `/host-system/usr/bin/runc`,
+  etc.) when the container has hostPath mounts. Each
+  fallback execution is wrapped in `timeout 1` because the host binary
+  may need shared libraries the container's mount namespace doesn't
+  provide. The leading `v` (e.g. `v1.1.10`) is stripped for
+  consistency.
+- **`tcp_probe` falls through methods in timeout-reliability order**
+  — nc → curl → python3 → bash (last because /dev/tcp has no native
+  timeout; gated on `timeout` being available).
+- **Bashism test now uses word-boundary matching** —
+  `tests/test_enumerator.py::test_script_no_bashisms` previously
+  flagged any substring match for `let `, which triggered on the
+  word `kubelet ` in comments and identifiers. Now uses regex
+  `(^|\s)<keyword>\s` so identifiers don't false-positive.
+  Authoritative bashism detection is `dash -n` in CI.
+
+### Notes for benchmark fixtures
+
+The 10 K8s Goat fixtures at `tests/fixtures/k8s-goat/` were regenerated
+against the v0.3.3 enumerator. Matched-technique sets are identical to
+v0.3.2 (the precision benchmark's `EXPECTED_MATCHES` sets did not
+need updating). One known regeneration limitation: T1
+(system-monitor, hostPID:true + hostIPC:true + hostPath:/) enumeration
+exceeds typical `kubectl exec` timeouts because hostPID exposes
+hundreds of host PIDs; that fixture is retained from v0.3.1 and
+verified to produce the same matched set via the benchmark. Slow-T1
+will be addressed in a future enumerator-perf pass.
 
 A regression-safety release. The v0.3.1 precision overhaul reached
 100% precision and 100% recall on the 10-pod K8s Goat benchmark; this
@@ -191,7 +278,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.2.0...v0.3.0

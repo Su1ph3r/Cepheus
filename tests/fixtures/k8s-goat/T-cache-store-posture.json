@@ -1,6 +1,6 @@
 {
   "enumeration_version": "0.1.0",
-  "timestamp": "2026-05-26T11:24:48Z",
+  "timestamp": "2026-05-26T14:06:44Z",
   "hostname": "cache-store-deployment-686d9bb8b-zmwbb",
   "kernel": {
     "version": "6.6.114.1-microsoft-standard-WSL2",
@@ -34,7 +34,10 @@
     "can_reach_docker_sock": false,
     "can_reach_containerd_sock": false,
     "can_reach_crio_sock": false,
-    "listening_ports": [6379, 6379]
+    "listening_ports": [6379, 6379],
+    "can_reach_etcd": false,
+    "can_reach_kubelet_api": true,
+    "component_reachability": {"ingress-nginx": false, "argocd": false, "harbor": false, "buildkit": false}
   },
   "credentials": {
     "service_account_token": true,
@@ -42,7 +45,7 @@
     "cloud_metadata_available": false
   },
   "runtime": {
-    "runtime": "unknown",
+    "runtime": "containerd",
     "runtime_version": null,
     "orchestrator": "kubernetes",
     "privileged": false,
@@ -63,7 +66,9 @@
     "node_access_indicators": [],
     "namespace": "secure-middleware",
     "pod_name": "cache-store-deployment-686d9bb8b-zmwbb",
-    "node_name": null
+    "node_name": null,
+    "cluster_components": [],
+    "cluster_components_probed": false
   },
   "cgroup_version": 2,
   "writable_paths": ["/proc/sysrq-trigger", "/proc/sys/kernel/core_pattern", "/sys", "/sys/fs/cgroup", "/dev", "/dev/shm", "/proc/sys/vm", "/proc/self/fd", "/sys/kernel/security", "/sys/kernel/uevent_helper", "/sys/devices/virtual/misc/device-mapper/dev"],

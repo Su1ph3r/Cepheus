@@ -1,6 +1,6 @@
 {
   "enumeration_version": "0.1.0",
-  "timestamp": "2026-05-26T02:13:11Z",
+  "timestamp": "2026-05-26T14:03:57Z",
   "hostname": "hunger-check-deployment-6dc95c48b7-7krtp",
   "kernel": {
     "version": "6.6.114.1-microsoft-standard-WSL2",
@@ -34,7 +34,10 @@
     "can_reach_docker_sock": false,
     "can_reach_containerd_sock": false,
     "can_reach_crio_sock": false,
-    "listening_ports": [8080]
+    "listening_ports": [8080],
+    "can_reach_etcd": false,
+    "can_reach_kubelet_api": false,
+    "component_reachability": {"ingress-nginx": false, "argocd": false, "harbor": false, "buildkit": false}
   },
   "credentials": {
     "service_account_token": true,
@@ -42,7 +45,7 @@
     "cloud_metadata_available": false
   },
   "runtime": {
-    "runtime": "unknown",
+    "runtime": "containerd",
     "runtime_version": null,
     "orchestrator": "kubernetes",
     "privileged": false,
@@ -63,7 +66,9 @@
     "node_access_indicators": [],
     "namespace": "big-monolith",
     "pod_name": "hunger-check-deployment-6dc95c48b7-7krtp",
-    "node_name": null
+    "node_name": null,
+    "cluster_components": [],
+    "cluster_components_probed": false
   },
   "cgroup_version": 2,
   "writable_paths": ["/dev", "/dev/shm", "/proc/self/fd"],

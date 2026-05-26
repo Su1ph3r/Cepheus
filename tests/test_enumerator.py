@@ -34,18 +34,31 @@ def test_script_starts_with_shebang():
 
 
 def test_script_no_bashisms():
-    """Basic check that the script avoids common bashisms."""
-    content = SCRIPT_PATH.read_text()
-    bashisms = [
-        "[[ ",  # bash-only test
-        "declare ",  # bash-only
-        "typeset ",  # bash-only
-        "let ",  # bash-only
-        "<<<",  # here-string
-        "function ",  # bash-only function declaration
-    ]
-    for bashism in bashisms:
-        assert bashism not in content, f"Found bashism '{bashism}' in enumerator script"
+    """Basic check that the script avoids common bashisms.
+
+    Each pattern is matched as a separate WORD (regex \\b boundaries) so
+    legitimate substrings like ``kubelet `` (which contains ``let ``) in
+    comments and identifiers don't trip the check. Authoritative
+    enforcement comes from ``dash -n enumerator/cepheus-enum.sh`` in CI.
+    """
+    import re
+
+    content = SCRIPT_PATH.read_text(encoding="utf-8")
+    # Pattern: a bash keyword that's a whole word (preceded by start-of-line
+    # / whitespace, followed by space — i.e. the keyword is used as a
+    # command, not a substring of an identifier). ``<<<`` and ``[[`` are
+    # special syntax tokens, not identifiers, so a plain substring match
+    # is appropriate for them.
+    word_bashisms = ["declare", "typeset", "let", "function"]
+    token_bashisms = ["[[ ", "<<<"]
+
+    for kw in word_bashisms:
+        # \b doesn't include the hyphen, so kubelet won't match `let` here.
+        pattern = re.compile(r"(^|\s)" + re.escape(kw) + r"\s", re.MULTILINE)
+        assert not pattern.search(content), f"Found bashism keyword '{kw}' used as a command in enumerator script"
+
+    for token in token_bashisms:
+        assert token not in content, f"Found bashism '{token}' in enumerator script"
 
 
 def test_script_outputs_json_keys():
@@ -113,9 +126,9 @@ def test_all_top_level_keys_present(enumerator_json):
         "writable_paths",
         "available_tools",
     }
-    assert expected == set(enumerator_json.keys()), (
-        f"Missing: {expected - set(enumerator_json.keys())}, Extra: {set(enumerator_json.keys()) - expected}"
-    )
+    assert expected == set(
+        enumerator_json.keys()
+    ), f"Missing: {expected - set(enumerator_json.keys())}, Extra: {set(enumerator_json.keys()) - expected}"
 
 
 def test_enumeration_version(enumerator_json):
