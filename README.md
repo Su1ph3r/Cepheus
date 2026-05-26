@@ -70,22 +70,24 @@ Chains are ranked highest-score-first. Multi-step chains receive a 15%-per-step 
 ## Configuration
 
 ```bash
-CEPHEUS_MIN_CONFIDENCE=0.3          # minimum confidence threshold
-CEPHEUS_MAX_CHAIN_LENGTH=3          # maximum chain step count
-CEPHEUS_WEIGHT_RELIABILITY=0.40     # scoring weight: reliability
-CEPHEUS_WEIGHT_STEALTH=0.25         # scoring weight: stealth
-CEPHEUS_WEIGHT_CONFIDENCE=0.35      # scoring weight: confidence
-CEPHEUS_CHAIN_LENGTH_PENALTY=0.15   # per-step penalty
-CEPHEUS_SANDBOX_MITIGATION_FACTOR=0.6  # score reduction for sandbox runtimes
+CEPHEUS_MIN_CONFIDENCE=0.3              # minimum confidence threshold
+CEPHEUS_MAX_CHAIN_LENGTH=3              # maximum chain step count
+CEPHEUS_WEIGHT_RELIABILITY=0.40         # scoring weight: reliability
+CEPHEUS_WEIGHT_STEALTH=0.25             # scoring weight: stealth
+CEPHEUS_WEIGHT_CONFIDENCE=0.35          # scoring weight: confidence
+CEPHEUS_CHAIN_LENGTH_PENALTY=0.15       # per-step penalty
+CEPHEUS_SANDBOX_MITIGATION_FACTOR=0.6   # score reduction for sandbox runtimes
+CEPHEUS_KERNEL_ONLY_MAX_CONFIDENCE=0.5  # cap on techniques with only kernel-version prereqs
+CEPHEUS_DISTRO_KERNEL_MAX_CONFIDENCE=0.2  # further cap when kernel is a backport-maintained distro build (WSL2/EKS/AKS/GKE/RHEL/...)
 CEPHEUS_LLM_MODEL=anthropic/claude-sonnet-4-20250514  # litellm model string
-CEPHEUS_LLM_API_KEY=sk-...          # API key for LLM enrichment
-CEPHEUS_LLM_TEMPERATURE=0.3         # LLM sampling temperature
-CEPHEUS_LLM_MAX_TOKENS=4096         # LLM max response tokens
+CEPHEUS_LLM_API_KEY=sk-...              # API key for LLM enrichment
+CEPHEUS_LLM_TEMPERATURE=0.3             # LLM sampling temperature
+CEPHEUS_LLM_MAX_TOKENS=4096             # LLM max response tokens
 ```
 
 ## Enumerator details
 
-The enumerator is an 834-line POSIX shell script with zero external dependencies — it runs under busybox sh, dash, bash, and inside distroless or scratch containers. It collects capabilities (full hex decode of CapEff/CapBnd/CapPrm), mounts and filesystem types, kernel version, cgroup v1/v2 detection, seccomp mode, AppArmor/SELinux profiles, namespace isolation via inode comparison, network interfaces, cloud metadata reachability, socket access, K8s service account tokens, secret-pattern env vars, runtime detection, RBAC permissions, 30+ tool availability checks, and writable sensitive paths.
+The enumerator is an 849-line POSIX shell script with zero external dependencies — it runs under busybox sh, dash, bash, and inside distroless or scratch containers. It collects capabilities (full hex decode of CapEff/CapBnd/CapPrm), mounts and filesystem types (with backslash-safe JSON escaping), kernel version, cgroup v1/v2 detection, seccomp mode, AppArmor/SELinux profiles, namespace isolation via inode comparison, network interfaces, cloud metadata reachability, socket access, K8s service account tokens, secret-pattern env vars, runtime detection (with `/proc/self/mountinfo` fallback for kind/k3s/EKS), RBAC permissions, 30+ tool availability checks, and writable sensitive paths.
 
 ## LLM support
 

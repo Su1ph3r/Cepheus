@@ -72,7 +72,7 @@ Cepheus/
 │       ├── html_report.py            # Self-contained HTML report (Jinja2)
 │       ├── mitre_layer.py            # MITRE ATT&CK Navigator layer export
 │       └── diff_terminal.py          # Diff/delta terminal output
-└── tests/                            # 144 tests across all modules
+└── tests/                            # 158 tests across all modules
 ```
 
 ## Engine Pipeline
@@ -87,6 +87,8 @@ The analysis engine runs a deterministic pipeline:
 - Resolves dot-paths into the Pydantic model (e.g., `capabilities.effective`)
 - Applies typed checks: `contains`, `any_of`, `equals`, `not_equals`, `gte`, `lte`, `kernel_gte`, `kernel_lte`, `kernel_between`, `exists`, `not_empty`, `regex`, `version_lte`
 - Missing fields use `confidence_if_absent` (default 0.3) rather than failing — handles incomplete enumeration gracefully
+- Techniques whose prerequisites are exclusively kernel-version checks are capped at `kernel_only_max_confidence` (default 0.5) so they don't dominate the chain ranking when the specific vulnerable component hasn't been confirmed
+- Kernels matching known distro/vendor backport patterns (WSL2, EKS, AKS, GKE, RHEL, Amazon Linux, LinuxKit, OrbStack, Bottlerocket, Flatcar) get a tighter cap (`distro_kernel_max_confidence`, default 0.2); the analyzer backfills the `kernel.is_distro_kernel` flag from the version string when the enumerator hasn't set it
 
 ### 3. Chain Building
 `chainer.py` constructs escape chains:
