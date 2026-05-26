@@ -126,9 +126,9 @@ def test_all_top_level_keys_present(enumerator_json):
         "writable_paths",
         "available_tools",
     }
-    assert expected == set(
-        enumerator_json.keys()
-    ), f"Missing: {expected - set(enumerator_json.keys())}, Extra: {set(enumerator_json.keys()) - expected}"
+    assert expected == set(enumerator_json.keys()), (
+        f"Missing: {expected - set(enumerator_json.keys())}, Extra: {set(enumerator_json.keys()) - expected}"
+    )
 
 
 def test_enumeration_version(enumerator_json):
