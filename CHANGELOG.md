@@ -7,6 +7,376 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-05-26
+
+Shift-left + verification release. Turns Cepheus from a one-shot CLI
+into a CI/CD gate (SARIF + `cepheus ci`) and adds live verification
+(`cepheus verify`) that confirms whether the kernel/runtime actually
+permits each matched primitive — catching false positives that even
+posture-driven precision can't eliminate.
+
+Note: 0.3.4 was never published; 0.3.5 supersedes the prior 0.3.4 entry
+in this changelog. PyPI / git tags jump 0.3.3 → 0.3.5 directly.
+
+### Added
+
+#### CI gate (`cepheus ci`)
+
+- **SARIF 2.1.0 output format** — new `src/cepheus/output/sarif.py`.
+  Each ranked chain becomes a SARIF `result`; each unique technique
+  becomes a deduplicated `rule` in `tool.driver.rules`. Severity maps
+  to SARIF `level` (critical/high → error, medium → warning, low →
+  note), and `properties.security-severity` carries a CVSS-like 0-10
+  score so GitHub Code Scanning's severity filters work as expected.
+  Stable `partialFingerprints.chainFingerprint/v1` prevents re-runs
+  from opening duplicate findings. Free-form posture data (hostname,
+  poc commands) is URL-encoded/markdown-escaped so a malicious posture
+  can't inject markup into the Code Scanning UI.
+- **`cepheus ci` subcommand** — `cepheus ci TARGET [OPTIONS]`. TARGET
+  is either an image reference (enumerated in an ephemeral container)
+  or a previously-captured posture JSON file. Gates:
+  - `--max-severity LEVEL` exits 1 if any chain meets or exceeds the
+    threshold (`low` / `medium` / `high` / `critical`).
+  - `--baseline FILE --fail-on-new` exits 1 if any chain appears in
+    the current scan that wasn't in the baseline report (regression
+    detection). Baseline accepts JSON or SARIF.
+  - Default `--format sarif` is the format GitHub Code Scanning
+    ingests.
+  - Exit codes: `0` pass, `1` gate failed, `2` invocation error.
+- **`cepheus enumerate --image IMAGE`** — extends `enumerate` with an
+  image-reference mode that spins up `docker run --rm --entrypoint sh
+  IMAGE /tmp/cepheus-enum.sh` to capture posture at build time. Pair
+  with `--runtime podman` for podman environments. The image path
+  detects "enumerator produced no output" (distroless / scratch
+  images that lack `/bin/sh`) and fails loudly with a clear pointer
+  to the running-container flow, rather than silently passing a
+  zero-finding scan.
+- **Posture structural validation** — both file-loaded and
+  enumerator-captured postures are now structurally validated before
+  the analyzer sees them. An empty `{}` or a JSON object missing
+  required top-level keys (`enumeration_version`, `kernel`, `runtime`)
+  is rejected with exit 1 instead of silently accepting a
+  fully-default `ContainerPosture` and producing a zero-finding scan.
+- **Baseline-diff engine** — `cepheus.engine.baseline` with
+  `load_baseline(path)` (auto-detects JSON vs. SARIF) and
+  `diff(current_chains, baseline_identities) -> BaselineDiff`.
+  Identities match on EITHER the chain hash OR the sorted technique-id
+  tuple, so a re-tune of the chain builder doesn't trigger
+  false-positive regressions on identical primitives. The `removed`
+  list is now deterministically ordered across runs.
+- **`docs/CI.md`** — operator guide covering the GitHub Actions
+  workflow, the three gating patterns (severity-only, regression-only,
+  both), and runtime troubleshooting.
+- **`cepheus-action/`** — composite GitHub Action that wraps
+  `cepheus ci` and uploads SARIF to Code Scanning. Every input is
+  funnelled through the step `env:` block (not interpolated into the
+  shell script) so untrusted caller inputs cannot inject shell
+  commands. All inputs are shape-validated up-front; the action
+  fails loudly if SARIF generation produces no file when upload is
+  requested, rather than silently skipping the upload step.
+- **`.github/workflows/release.yml`** — publishes wheel + sdist on
+  `v*.*.*` tag push, uploads release assets, publishes to PyPI when
+  `PYPI_API_TOKEN` is set. Missing token is now a hard failure
+  (was a silent `exit 0` no-op). Workflow runs with `contents: read`
+  by default; jobs widen scope only as needed. The `workflow_dispatch`
+  `tag` input is passed via env var and shape-validated before use.
+- README has a `cepheus ci` snippet linking to the full CI guide.
+
+#### Verification (`cepheus verify`)
+
+- **`cepheus verify` subcommand** — live-tests each matched technique
+  against a running container by `<runtime> exec`-ing a
+  non-destructive probe inside it. Three outcomes per technique:
+  - `CONFIRMED` — verifier exited 0; primitive works in this container.
+  - `NOT_CONFIRMED` — verifier exited non-zero; static match was a
+    false positive (typical: EROFS, EPERM, missing tool).
+  - `NO_VERIFIER` — technique has no automated probe (kernel CVEs
+    where the only confirmation is real exploitation).
+  Exit code 0 if any technique is `CONFIRMED`, 1 otherwise. Supports
+  `--all-critical` filter, repeatable `--technique ID` for targeted
+  runs, and `--format json` for downstream consumption.
+- **`EscapeTechnique.cli_flag: str | None`** — explicit typed field
+  for the container-runtime flag that closes the primitive
+  (e.g. `--cap-drop=SYS_ADMIN`). Replaces the prose-mining regex
+  extraction from `remediation` text used pre-0.3.5. A safer
+  first-word-only fallback remains for downstream consumers that
+  ship their own technique definitions.
+- **`EscapeTechnique.verify_command: str | None`** — non-destructive
+  shell one-liner that proves the primitive when run inside a matched
+  container. 23 of 65 techniques populated; the rest have
+  `verify_command=None` (kernel CVEs, RBAC checks that need API
+  access, etc.).
+- `cepheus.engine.verifier` module with `verify_analysis()`,
+  `VerifyOutcome` enum, `TechniqueVerification` + `VerificationReport`
+  dataclasses. Distinct sentinel exit codes for "timeout" vs.
+  "runtime binary missing" so operators can tell whether to bump
+  `--timeout` or fix their docker install.
+
+### Changed
+
+- **`analyze` command body extracted into shared helpers** —
+  `_run_analysis`, `_filter_by_severity`, `_render_output` are now
+  module-level so `cepheus ci` reuses them without copy-pasting the
+  pipeline. Behaviour is unchanged for `analyze`.
+- **`enumerate` accepts `--image` as an alternative to `--container-id`**
+  — exactly one of the two must be passed (the command exits 2 — the
+  same exit code `ci` uses for invocation errors — if both or neither
+  are given).
+- **`OutputFormat` enum extends** with `sarif`. The `analyze` command
+  now accepts `--format sarif` directly (the `ci` command uses it by
+  default).
+- **14 capability/mount/namespace techniques** now declare an explicit
+  `cli_flag`. The analyzer's `RemediationItem.runtime_flag` now reads
+  this field directly when populated. The 3 `--security-opt`
+  techniques (apparmor/selinux + apparmor-cap) previously had
+  INCOMPLETE flag extraction (the regex stopped at the first word and
+  dropped the value); the explicit `cli_flag` field fixes them to
+  `--security-opt apparmor=docker-default` etc.
+- **Verifier outcomes are best-effort non-destructive.** The verifier
+  family covers two shapes: pure file/readlink/test probes that
+  perform no state change at all, and open-then-close (`exec 3>>…;
+  exec 3>&-`) probes that trigger the kernel's permission check
+  without ever issuing a write. Two members (`cap_sys_admin_mount`,
+  `cap_net_admin`) do perform transient state changes that self-clean
+  on the same shell line; treat these as "minimally-destructive
+  transient state that self-cleans" rather than "strictly read-only."
+- **`cap_dac_override` verifier** rewritten from a create-and-delete
+  probe (`:> /var/log/_cepheus_v && rm -f`) to a strictly-readonly
+  open-for-append-and-close on `/etc/shadow`, eliminating the
+  "interrupt leaks state" failure mode the old probe had.
+- **`cap_sys_ptrace` verify_command set to None.** The previous probe
+  (`ps -p 1 -o stat=`) only checked /proc/1 readability — true in
+  every container — and reported CONFIRMED 100% of the time
+  regardless of whether the cap was actually held. NO_VERIFIER is
+  honest; always-CONFIRMED is a silent lie.
+
+### Fixed
+
+- **Release-pipeline split-brain prevention.** `release.yml` `publish-pypi`
+  job now `needs: [build, attach-to-release]` — was `needs: build` only,
+  letting PyPI (which forbids re-uploads) publish before GitHub Release
+  assets were durable. If the asset upload then failed, the only
+  recovery was bumping the version. The serialized variant trades
+  ~30s of pipeline time for an unbreakable invariant.
+- **`workflow_dispatch` tag input now actually used in `release.yml`.**
+  `Capture metadata` previously read `GITHUB_REF` unconditionally, which
+  on `workflow_dispatch` is `refs/heads/<branch>` — so the documented
+  manual-dispatch path always failed with a misleading "tag doesn't
+  match pyproject.toml version" error. The step now sources from
+  `inputs.tag` (env-hoisted) when the trigger is `workflow_dispatch`.
+- **`get_all_techniques()` now returns isolated objects.** Pre-0.3.5
+  returned `list(_TECHNIQUES)` — a shallow copy where the inner Pydantic
+  models were shared. A caller mutating one technique (test fixtures,
+  SDK monkey-patching) silently corrupted the global database for every
+  subsequent caller. Now returns a `copy.deepcopy` so each caller gets
+  its own isolated graph. Negligible cost (~65 model clones, <1ms).
+- **`_enumerate_container` empty-stdout guard mirrors `_enumerate_image`.**
+  A `docker exec` that exited 0 with empty stdout previously fell
+  through to `_validate_posture_json` and surfaced as a confusing
+  "did not produce valid JSON" error. Now detected at the source with
+  a clear pointer to the actual cause (container's `/bin/sh` exited
+  early, enumerator killed mid-run).
+- **`_enumerate_container` now streams the script via stdin instead of
+  `docker cp` + `docker exec`.** Closes a TOCTOU window where a
+  co-tenant process inside the target container could have replaced
+  `/tmp/cepheus-enum.sh` between the copy and the exec, getting
+  Cepheus's privileged scan to run attacker-controlled code. Also
+  eliminates the leftover-script artifact (forensics no longer sees
+  an unexplained shell script in `/tmp/` after a scan).
+- **Wall-clock timeout (`120s`) on `_enumerate_image` and
+  `_enumerate_container`.** A hung enumerator no longer runs forever;
+  the host-side subprocess kill fires deterministically.
+- **In-container `timeout(1)` wrap on every verifier probe.**
+  `docker exec`'s host-side SIGKILL on `subprocess.TimeoutExpired`
+  does NOT propagate through the daemon to the in-container shell —
+  pre-0.3.5 a timed-out probe left an orphan shell running inside the
+  target. The verifier now invokes `timeout -k 1 <budget> sh -c <cmd>`
+  inside the container so the wall-clock kill fires in the right
+  namespace. Falls back gracefully when `timeout(1)` is missing.
+- **`_RC_INFRA = -3` sentinel catches the long tail of OS-side
+  subprocess errors.** Pre-0.3.5 `_execute_in_container` only caught
+  `TimeoutExpired` and `FileNotFoundError`; `PermissionError`, `OSError`,
+  `UnicodeDecodeError` propagated and crashed the entire
+  `verify_analysis` walk. Now per-technique `ERROR` rows.
+- **Executive summary now describes only the chains the user sees.**
+  Pre-0.3.5 the LLM summary was generated BEFORE `_filter_by_severity`,
+  so a `--min-severity critical` run produced a report whose summary
+  discussed chains the user had explicitly filtered out. The summary
+  step now runs after the filter; the per-chain LLM enrichment still
+  runs before so the LLM has full cross-chain context.
+- **`AnalysisResult.techniques_in_visible_chains`** — additive field
+  populated by `_filter_by_severity` with the unique-technique count
+  across the post-filter chain set. The legacy `techniques_matched`
+  (pre-filter count) is preserved unchanged so dashboards charting it
+  over time don't see a step-change. Renderers should prefer the new
+  field when present to keep summary counts consistent with rendered
+  chain counts.
+- **`_render_output` `auto_write_json` gate.** Pre-0.3.5 the auto-write
+  fallback fired for any format that wasn't mitre/html/sarif — meaning
+  `cepheus ci --format text -o gate.log` silently wrote a JSON report
+  into `gate.log`. The `analyze` command (which historically used
+  `-o X.json` as shorthand for "give me a JSON file") still gets the
+  shortcut via `auto_write_json=True`; `ci` does not, so its text-format
+  output is now empty-or-rendered-terminal as expected.
+- **`_validate_output_path` helper rejects directory `--output` cleanly.**
+  Every `--output` site (`analyze`, `ci`, `diff`, `verify`, `enumerate`)
+  previously raised an uncaught `IsADirectoryError` (Linux) /
+  `PermissionError` (Windows) when the user passed an existing
+  directory. Now a clear "directory, not a file" error at exit code 2.
+  Same for `--output` paths whose parent directory doesn't exist.
+- **Baseline JSON/SARIF loaders harden against malformed input.**
+  `_identities_from_json_report` and `_identities_from_sarif` now use
+  `isinstance` defenses throughout — a corrupted or hand-edited
+  baseline with `null` chains, non-dict steps, non-list `runs`, or
+  non-dict `properties` no longer crashes with an uncaught
+  `AttributeError`; entries are silently skipped and the rest of the
+  baseline loads. Empty-string technique IDs are dropped at extract
+  time so they can't form a `("",)` tuple that spuriously matches
+  other corrupted baseline entries.
+- **`baseline.diff` consume-on-match: one baseline entry preserves AT
+  MOST one current chain.** Pre-0.3.5 if two current chains both matched
+  the same baseline entry (same technique tuple, different chain_ids),
+  both were appended to `preserved` and the second silently masked a
+  regression for `--fail-on-new`. Now the first claims the baseline
+  entry and the second correctly falls through to `new`.
+- **SARIF format detection in baseline loader loosened.** Now accepts
+  any dict with a `runs` array AND either `version` or `$schema` —
+  pre-0.3.5 required strict `version == "2.1.0"` string equality,
+  rejecting structurally-valid SARIF logs from generators that emit
+  `version: 2.1` (numeric) or use only `$schema`.
+- **`_generate_remediations` no longer crashes on whitespace-only
+  remediation.** `.split()[0]` raises `IndexError` on whitespace-only
+  strings; the analyzer now uses safe length-check indexing.
+- **Markdown code-fence sanitizer hardened against long backtick runs
+  and indented fences.** Pre-0.3.5 the regex `^```` only collapsed the
+  FIRST 3 backticks at line start, leaving any leftover backticks
+  (10-char run → 7 remaining) to close the outer fence and inject
+  arbitrary markdown into Code Scanning UI. New regex
+  `^\s{0,3}`{3,}` collapses any 3-or-more-backtick run, including
+  CommonMark's up-to-3-space-indented variants.
+- **SARIF rules and results builders share the same chain filter.**
+  Pre-0.3.5 the rules loop didn't pre-filter empty-step chains while
+  the results loop did, producing reports where rule counts could
+  drift from result counts.
+- **`_render_poc` ImportError catch narrowed to the import statement.**
+  Was wrapping both import and call — so a transitive-dep `ImportError`
+  raised from inside `render_poc` was silently swallowed and the user
+  got a "No PoC template" placeholder. Now only the import is wrapped;
+  call-time exceptions surface as real tracebacks.
+- **GitHub Action `chain-count=unknown` documented.** Action README now
+  shows the right consumer pattern (check for `unknown` before
+  numeric comparison) so downstream gates don't silently classify a
+  corrupt scan as "all clear."
+- **GitHub Action `sarif-sha256` output added.** Captures the
+  immediately-post-scan hash of the SARIF file so consumers using the
+  action in parallel matrix jobs or with shared output paths can
+  detect a later overwrite before the upload step runs.
+- **Silent zero-finding scan when enumerator emits empty output.**
+  `_enumerate_image` now detects empty stdout (distroless / scratch
+  images) and fails loudly instead of returning `""` and letting
+  every downstream gate report "no issues." Stderr is also surfaced
+  even when the runtime exits 0.
+- **`_validate_posture_json` actually validates structure** — was
+  named "validate" but only checked `json.loads`-ability; `{}` and
+  any other valid-JSON-but-not-a-posture string passed the gate.
+  Now also rejects objects missing required top-level keys.
+- **Severity-gate filter no longer silently bypasses unknown
+  severities.** Pre-0.3.5 used `dict.get(c.severity.value, 0)`,
+  routing any new severity tier below every gate. Switched to direct
+  indexing so a new enum value raises loudly instead.
+- **Posture-validation exception handling narrowed to
+  `pydantic.ValidationError`** at three sites in `cli.py`. Previously
+  every other exception (model refactor bugs, AttributeError,
+  TypeError) collapsed into the same "Invalid posture data" message,
+  making real model bugs indistinguishable from bad user input.
+- **LLM-client exception handling narrowed** in `_run_analysis` —
+  `AttributeError` and `TypeError` are re-raised so programming bugs
+  (renamed methods, wrong signatures) surface as tracebacks instead
+  of being buried as "LLM failed" warnings. Other exceptions still
+  warn-and-continue, now with the exception type name surfaced.
+- **`ContainerPosture.hostname` URL-encoded into SARIF URIs.** A
+  hostname containing newlines, slashes, or control characters can no
+  longer produce a malformed SARIF or break the location rendering
+  in Code Scanning.
+- **PoC commands sanitized before embedding in SARIF markdown.**
+  Triple-backtick fence-breaking sequences in posture-derived
+  PoC strings are rewritten to tilde sequences so a malicious
+  posture can't escape the code fence and inject arbitrary markdown.
+- **Untrusted CLI strings escaped through Rich.** Image references,
+  container IDs, and runtime names rendered into CI log output via
+  `console.print(f"[cyan]…[/cyan]")` are now passed through
+  `rich.markup.escape` so a value like `[link=evil]click[/link]`
+  can't inject a clickable link into CI logs.
+- **`enumerate` exit code on mutex-violation argv** changed from 1 to
+  2 to match the documented exit-code convention in `docs/CI.md`
+  (2 = invocation/configuration error).
+- **Verifier sentinel exit codes split.** `_RC_TIMEOUT` (-1) and
+  `_RC_NO_RUNTIME` (-2) are now distinct so operators can tell
+  whether the verifier hit a timeout vs. failed to find `docker` /
+  `podman`.
+- **`baseline.ChainIdentity.matches` no longer returns true for two
+  empty identities.** Corrupted baseline entries with no chain_id and
+  no techniques can no longer silently match every degenerate chain.
+- **`baseline.load_baseline` surfaces read errors as `ValueError`.**
+  Permission errors and encoding errors are now wrapped in
+  `ValueError` so the CLI's existing handler produces a polished
+  message instead of leaking a raw Python traceback.
+- **`baseline.diff` produces deterministic `removed` ordering.**
+  Output is now stable across runs against the same inputs; consumers
+  diff'ing CI output against itself no longer see spurious churn.
+- **Analyzer remediation regex fallback hardened.** Pre-0.3.5
+  scanned the full remediation text for any `--` token, which could
+  produce inverted advice ("If --privileged is set, drop X" extracted
+  `--privileged` as the *fix*). Now matches only the leading token.
+- **GitHub Action input handling moved fully to `env:` indirection.**
+  Every `${{ inputs.* }}` reference in a `run:` block was a
+  script-injection sink; values are now hoisted into the step
+  `env:` block and referenced as shell variables, where quoting is
+  meaningful.
+- **Action validation error strings use single-quoted echo.** Pre-0.3.5
+  used double-quoted echo with embedded backticks, which bash
+  interpreted as command substitution and would silently invoke
+  `image`, `posture-file`, `fail-on-new`, or `baseline` binaries if
+  present on PATH.
+- **Action SARIF-upload behaviour fails loudly when SARIF is missing.**
+  Replaces the prior `hashFiles(inputs.output) != ''` conditional
+  that silently skipped the upload step when SARIF write failed —
+  which left Code Scanning empty while CI reported success.
+- **Action `chain-count` output distinguishes parse-error from zero.**
+  Pre-0.3.5 collapsed corrupt-SARIF parse failures into `chain-count=0`;
+  now emits `chain-count=unknown` so downstream gates that branch on
+  zero results don't mis-classify a broken scan as "all clear."
+- **Release workflow fails loudly when `PYPI_API_TOKEN` is unset.**
+  Was `exit 0` (silent no-op publish); operator opt-out is now via
+  the `SKIP_PYPI` repository variable at the job-conditional level.
+- **Release workflow `workflow_dispatch` tag input validated and
+  passed via env var.** Pre-0.3.5 interpolated the input directly
+  into a bash script (script-injection sink); now hoisted into
+  `INPUT_TAG` and shape-validated against `v<n>.<n>.<n>`.
+- **ruff version drift between local dev and CI** — `pyproject.toml`'s
+  `[project.optional-dependencies].dev` now pins `ruff==0.15.14`
+  exactly, matching the pin in `.github/workflows/ci.yml`. Both v0.3.2
+  and v0.3.3 had their first CI run go red because a `pip install -e
+  ".[dev]"` had silently downgraded local ruff to a version that
+  formats `assert + f-string` messages differently from CI's. The
+  exact pin closes that drift channel; update CI + dev together when
+  bumping ruff.
+
+### Notes
+
+- **Verify outcomes are best-effort non-destructive.** Most probes
+  are read-only or use the open-then-close idiom; two
+  (`cap_sys_admin_mount`, `cap_net_admin`) perform transient state
+  changes that self-clean on the same shell line. The verifier never
+  exploits.
+- **NOT_CONFIRMED is a precision win, not a recall loss.** If
+  `cap_net_admin` matches statically but the container has no `ip`
+  binary, the verifier reports NOT_CONFIRMED because it couldn't
+  prove the primitive works — not because the cap is absent. Operators
+  reading the report should treat NOT_CONFIRMED as "primitive may
+  still be exploitable via a different mechanism" rather than
+  "completely safe."
+
 ## [0.3.3] - 2026-05-26
 
 Finishes the precision-overhaul work started in v0.3.1: wires up the
@@ -278,7 +648,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...v0.3.5
 [0.3.3]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.0...v0.3.1

@@ -41,12 +41,23 @@ cepheus diff before.json after.json --format json -o delta.json
 ```
 
 ```bash
+# CI gate — fail the build on critical chains; SARIF for GitHub Code Scanning
+cepheus ci my-app:${GITHUB_SHA} --max-severity critical -f sarif -o cepheus.sarif
+
+# Regression-only gate — fail only when NEW chains appear vs. baseline
+cepheus ci my-app:${GITHUB_SHA} --baseline baseline.sarif --fail-on-new -f sarif -o out.sarif
+```
+
+```bash
 # browse techniques
 cepheus techniques
 cepheus techniques --category capability
 cepheus techniques --search "sys_admin"
 cepheus techniques --severity critical
 ```
+
+See [docs/CI.md](docs/CI.md) for the full CI integration guide, including
+the GitHub Actions workflow that uploads SARIF to Code Scanning.
 
 ## Technique coverage
 

@@ -1,0 +1,292 @@
+name: Cepheus Container Escape Scanner
+description: >-
+  Scan a container image for escape paths. Builds posture, ranks chains,
+  emits SARIF for GitHub Code Scanning, and optionally fails the build
+  on severity or baseline-regression thresholds.
+author: Su1ph3r
+branding:
+  icon: shield
+  color: red
+
+# IMPORTANT — script-injection hardening.
+# Every `${{ inputs.* }}` expansion in a `run:` block is a script-injection
+# sink: GitHub evaluates the expression and substitutes the literal string
+# into the shell script BEFORE the shell parses it. A malicious input
+# containing a closing quote + semicolon + command yields RCE on the
+# runner with the calling workflow's permissions.
+# Mitigation pattern used throughout this file:
+#   1. Hoist every input into the step's `env:` block as `INPUT_<name>`.
+#   2. Inside `run:`, reference the env var as "$INPUT_<name>" (the shell
+#      quotes it correctly — GitHub never touches it).
+# Do NOT introduce any new `${{ inputs.* }}` references inside `run:`.
+
+inputs:
+  image:
+    description: >-
+      Image reference to scan (e.g. `nginx:latest`, `ghcr.io/org/app:sha`).
+      Mutually exclusive with `posture-file`.
+    required: false
+  posture-file:
+    description: >-
+      Path to a posture JSON file from a previous `cepheus enumerate` run.
+      Use this when scanning a deployed pod whose posture was captured out-of-band.
+      Mutually exclusive with `image`.
+    required: false
+  max-severity:
+    description: >-
+      Fail the build if any chain has this severity or higher.
+      One of `low`, `medium`, `high`, `critical`. Leave empty to disable
+      the severity gate (pair with fail-on-new for regression-only gating).
+    required: false
+    default: ""
+  baseline:
+    description: >-
+      Path to a previous Cepheus report (JSON or SARIF). Required for
+      `fail-on-new`. Stored as part of your repo so PRs compare against
+      the latest tip of main.
+    required: false
+    default: ""
+  fail-on-new:
+    description: >-
+      Fail the build when any chain appears in the current scan that
+      wasn't in `baseline`. Requires `baseline`. Default: false.
+    required: false
+    default: "false"
+  output:
+    description: >-
+      SARIF output path. Must be a workspace-relative path without glob
+      characters (`*`, `?`, `[`) or parent-directory references.
+    required: false
+    default: "cepheus.sarif"
+  upload-sarif:
+    description: >-
+      Upload the SARIF report to GitHub Code Scanning automatically.
+      Requires `permissions: { security-events: write }` on the job.
+    required: false
+    default: "true"
+  cepheus-version:
+    description: >-
+      Cepheus version to install (e.g. `0.3.5`). Defaults to the version
+      this action ships alongside — change in lockstep with the action
+      tag so consumers get a reproducible install.
+    required: false
+    default: "0.3.5"
+  runtime:
+    description: Container runtime for image-based enumeration (`docker` or `podman`).
+    required: false
+    default: "docker"
+  python-version:
+    description: Python version to install Cepheus under.
+    required: false
+    default: "3.12"
+
+outputs:
+  sarif-path:
+    description: >-
+      Path to the SARIF report file written by the scanner. Defaults to
+      `inputs.output` but consumers should reference this output rather
+      than `inputs.output` directly so the path stays correct if the
+      scan step ever stages SARIF elsewhere.
+    value: ${{ steps.scan.outputs.sarif-path }}
+  passed:
+    description: '`true` if all gates passed, `false` if any failed.'
+    value: ${{ steps.scan.outputs.passed }}
+  chain-count:
+    description: >-
+      Total number of escape chains detected, as a decimal-integer
+      string (e.g. `0`, `5`, `42`). The literal string `unknown` is
+      emitted when the SARIF file was not produced or could not be
+      parsed — downstream gates that branch on `chain-count == '0'`
+      MUST explicitly handle `'unknown'` before doing numeric
+      comparisons, otherwise a corrupt scan is silently classified as
+      "all clear."
+    value: ${{ steps.scan.outputs.chain-count }}
+  sarif-sha256:
+    description: >-
+      Hex SHA-256 of the SARIF file as written by Cepheus, captured
+      immediately after the scan step. Empty string if the SARIF was
+      not produced. Use this when a later step overwrites the workspace
+      path (parallel matrix jobs, multiple uses of this action in one
+      job sharing `output:`) — a hash mismatch at upload time signals
+      a different file is being uploaded than the one this action
+      reported on.
+    value: ${{ steps.scan.outputs.sarif-sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_POSTURE_FILE: ${{ inputs.posture-file }}
+        INPUT_FAIL_ON_NEW: ${{ inputs.fail-on-new }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_CEPHEUS_VERSION: ${{ inputs.cepheus-version }}
+        INPUT_MAX_SEVERITY: ${{ inputs.max-severity }}
+        INPUT_RUNTIME: ${{ inputs.runtime }}
+      run: |
+        # Single quotes around the annotation strings so the embedded
+        # backticks don't trigger bash command substitution (which would
+        # try to execute `image`, `posture-file`, etc. as binaries).
+        if [ -z "$INPUT_IMAGE" ] && [ -z "$INPUT_POSTURE_FILE" ]; then
+          echo '::error::Pass exactly one of `image` or `posture-file`.'
+          exit 1
+        fi
+        if [ -n "$INPUT_IMAGE" ] && [ -n "$INPUT_POSTURE_FILE" ]; then
+          echo '::error::Pass only one of `image` or `posture-file`, not both.'
+          exit 1
+        fi
+        if [ "$INPUT_FAIL_ON_NEW" = "true" ] && [ -z "$INPUT_BASELINE" ]; then
+          echo '::error::`fail-on-new: true` requires `baseline` to be set.'
+          exit 1
+        fi
+
+        # output path: must be relative, no glob/traversal metacharacters.
+        # `hashFiles()` downstream interprets this as a glob pattern;
+        # restricting it here also defends against path traversal that
+        # could write the SARIF outside the workspace.
+        case "$INPUT_OUTPUT" in
+          ""|/*|*..*|*'*'*|*'?'*|*'['*)
+            echo "::error::output must be a workspace-relative path without glob characters or '..' segments."
+            exit 1
+            ;;
+        esac
+
+        # cepheus-version: PEP 440 shape only. Defends against injection
+        # at the install step in addition to the env-var hoisting.
+        case "$INPUT_CEPHEUS_VERSION" in
+          ""|*[!0-9a-zA-Z._+-]*)
+            echo "::error::cepheus-version must be a PEP 440 version string."
+            exit 1
+            ;;
+        esac
+
+        # runtime + max-severity: enumerated values, validated up-front.
+        case "$INPUT_RUNTIME" in
+          docker|podman) ;;
+          *) echo "::error::runtime must be 'docker' or 'podman'."; exit 1 ;;
+        esac
+        case "$INPUT_MAX_SEVERITY" in
+          ""|low|medium|high|critical) ;;
+          *) echo "::error::max-severity must be empty or one of low/medium/high/critical."; exit 1 ;;
+        esac
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: pip
+
+    - name: Install Cepheus
+      shell: bash
+      env:
+        INPUT_CEPHEUS_VERSION: ${{ inputs.cepheus-version }}
+      run: |
+        # INPUT_CEPHEUS_VERSION was validated above; it always has a value
+        # (the input default is the version this action ships alongside).
+        pip install "cepheus==${INPUT_CEPHEUS_VERSION}"
+        cepheus --version
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+        INPUT_POSTURE_FILE: ${{ inputs.posture-file }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_RUNTIME: ${{ inputs.runtime }}
+        INPUT_MAX_SEVERITY: ${{ inputs.max-severity }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_FAIL_ON_NEW: ${{ inputs.fail-on-new }}
+      run: |
+        set +e   # we manage exit code ourselves so we can surface outputs
+
+        # Explicit if/else (not concatenation) so a validation bypass
+        # can't produce a corrupted target like 'nginx:latestposture.json'.
+        if [ -n "$INPUT_IMAGE" ]; then
+          target="$INPUT_IMAGE"
+        else
+          target="$INPUT_POSTURE_FILE"
+        fi
+
+        args=(ci "$target" --format sarif --output "$INPUT_OUTPUT" --runtime "$INPUT_RUNTIME")
+        if [ -n "$INPUT_MAX_SEVERITY" ]; then
+          args+=(--max-severity "$INPUT_MAX_SEVERITY")
+        fi
+        if [ -n "$INPUT_BASELINE" ]; then
+          args+=(--baseline "$INPUT_BASELINE")
+        fi
+        if [ "$INPUT_FAIL_ON_NEW" = "true" ]; then
+          args+=(--fail-on-new)
+        fi
+
+        echo "Running: cepheus ${args[*]}"
+        cepheus "${args[@]}"
+        rc=$?
+
+        # Always surface outputs even when the gate failed — the SARIF
+        # upload step below needs to run regardless.
+        echo "sarif-path=${INPUT_OUTPUT}" >> "$GITHUB_OUTPUT"
+        if [ "$rc" -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Extract chain count via a Python script that distinguishes
+        # "file present, zero results" from "file missing or unparseable".
+        # The unparseable case emits 'unknown' so downstream gates that
+        # check `chain-count == '0'` don't mis-classify a corrupt SARIF
+        # as "all clear."
+        if [ -f "$INPUT_OUTPUT" ]; then
+          count=$(python - <<'PY' 2>/dev/null || echo unknown
+        import json, os, sys
+        try:
+            with open(os.environ['INPUT_OUTPUT'], 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            runs = data.get('runs') or []
+            if not runs:
+                print(0)
+            else:
+                print(len(runs[0].get('results', [])))
+        except Exception:
+            print('unknown')
+            sys.exit(1)
+        PY
+        )
+          echo "chain-count=${count}" >> "$GITHUB_OUTPUT"
+          # Capture the SARIF hash immediately after Cepheus exits so
+          # consumers can detect a later overwrite (parallel matrix jobs
+          # sharing the workspace path, repeated use of this action in
+          # one job, etc.). sha256sum is on every github-hosted runner.
+          sha=$(sha256sum -- "$INPUT_OUTPUT" 2>/dev/null | awk '{print $1}')
+          echo "sarif-sha256=${sha}" >> "$GITHUB_OUTPUT"
+        else
+          echo "chain-count=unknown" >> "$GITHUB_OUTPUT"
+          echo "sarif-sha256=" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit $rc
+
+    - name: Verify SARIF was written
+      # When upload is requested, the SARIF file MUST exist after the scan.
+      # If it's missing or empty, fail loudly here rather than silently
+      # skipping the upload step (which leaves Code Scanning empty and
+      # operators with a false "no findings" signal).
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      shell: bash
+      env:
+        INPUT_OUTPUT: ${{ inputs.output }}
+      run: |
+        if [ ! -s "$INPUT_OUTPUT" ]; then
+          echo "::error::Cepheus did not produce a SARIF file at $INPUT_OUTPUT. Review the Scan step output above; SARIF will NOT be uploaded to Code Scanning."
+          exit 1
+        fi
+
+    - name: Upload SARIF to Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: cepheus

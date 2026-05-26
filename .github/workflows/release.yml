@@ -1,0 +1,200 @@
+name: release
+
+# Publishes to PyPI + attaches sdist/wheel to the GitHub Release when a
+# tag matching v*.*.* is pushed. The Release itself is expected to exist
+# (the `gh release create` step at ship time is unchanged); this workflow
+# only ATTACHES wheels and PUBLISHES to PyPI.
+#
+# Setup before first use:
+#   1. Create a PyPI project + API token (https://pypi.org/manage/account/token/)
+#   2. Add it as a repo secret named PYPI_API_TOKEN at
+#      Settings → Secrets and variables → Actions
+#   3. Tag + push: git tag v0.3.5 && git push origin v0.3.5
+#
+# Trusted-publishing alternative: if we set up OIDC trusted publishing on
+# PyPI (https://docs.pypi.org/trusted-publishers/) we can drop the token
+# entirely and use `pypa/gh-action-pypi-publish@release/v1` with id-token
+# permissions. That's the recommended modern path; the token route is
+# documented here as the fallback that always works.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.3.5)"
+        required: true
+        type: string
+
+# Default to least-privilege at the workflow scope; each job widens to
+# only what it needs. Prevents a compromised build step from minting
+# OIDC tokens or pushing commits.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags are needed so `python -m build` records the version
+          # correctly (hatchling reads `[project].version` directly so
+          # this is belt-and-braces).
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Capture metadata
+        id: metadata
+        env:
+          # workflow_dispatch supplies the tag via input; push-tag uses GITHUB_REF.
+          # Hoist the input through env so the bash script doesn't eat a
+          # script-injection sink (same hardening pattern as the rest of this file).
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+          # Resolve the tag from the trigger context. On push-tag, GITHUB_REF
+          # is refs/tags/<tag>; on workflow_dispatch it is refs/heads/<branch>
+          # and the operator supplies the tag via the `tag` input.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [ -z "${tag}" ]; then
+            echo "::error::No tag resolved — neither refs/tags/<tag> nor workflow_dispatch input 'tag' supplied."
+            exit 1
+          fi
+
+          # Validate tag shape even on dispatched runs (push-tag is already
+          # constrained by the workflow's `tags:` filter).
+          case "${tag}" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::Invalid tag '${tag}' — must match v<major>.<minor>.<patch>."
+              exit 1
+              ;;
+          esac
+
+          if [ "${tag#v}" != "${v}" ]; then
+            echo "::error::Tag ${tag} doesn't match pyproject.toml version ${v}"
+            exit 1
+          fi
+
+      - name: Build
+        run: python -m build
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Upload artifacts (for later jobs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  attach-to-release:
+    name: attach sdist + wheel to GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    # Only this job needs to write to the repo (to attach release assets).
+    # Scoped here rather than at the workflow level so build / publish
+    # jobs run without contents:write.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+
+      - name: Attach assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pass workflow_dispatch input via env so the expression isn't
+          # interpolated into the shell script — defends against tag
+          # values that contain shell metacharacters / closing quotes.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          if [ -z "$tag" ]; then
+            tag="$INPUT_TAG"
+          fi
+          # Defence in depth: validate tag shape before using it. The
+          # `tags:` trigger filter already restricts push-driven runs to
+          # `v*.*.*`, but workflow_dispatch accepts any string.
+          case "$tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::Invalid tag '$tag' — must match v<major>.<minor>.<patch>."
+              exit 1
+              ;;
+          esac
+          # Idempotent: if assets already exist (because we ran gh release
+          # create with them at ship time), --clobber overwrites instead
+          # of failing.
+          gh release upload "$tag" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
+
+  publish-pypi:
+    name: publish to PyPI
+    # Wait for attach-to-release so PyPI (irreversible — no overwrites)
+    # only publishes after the GitHub Release assets are durable. The
+    # alternative ordering can produce a split-brain release: PyPI live
+    # at vX.Y.Z but the GitHub Release has no installable artifacts, with
+    # no recovery path except bumping the version.
+    needs: [build, attach-to-release]
+    runs-on: ubuntu-latest
+    # `id-token: write` reserved here for the future migration to PyPI
+    # trusted publishing (`pypa/gh-action-pypi-publish`). The current
+    # twine path uses a token secret and doesn't need OIDC — kept here
+    # so the switch later is a single step replacement.
+    permissions:
+      contents: read
+      id-token: write
+    # Skip the whole job when the operator explicitly opts out — useful
+    # for forks / mirrors that don't have PyPI credentials configured.
+    if: ${{ vars.SKIP_PYPI != 'true' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+
+      - name: Publish via twine
+        # Twine is the safest option until trusted publishing is set up
+        # — explicit token, clear failure mode. To migrate later: switch
+        # this step to `pypa/gh-action-pypi-publish@release/v1` and remove
+        # the secrets/twine block.
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          if [ -z "${TWINE_PASSWORD}" ]; then
+            # FAIL loudly — earlier versions exited 0 here, which made
+            # tag pushes appear green while silently no-op-ing the
+            # publish. A green release with PyPI still at the old version
+            # is the worst-of-both-worlds outcome; opt-out is via the
+            # repo-level SKIP_PYPI variable (see job `if:` above).
+            echo "::error::PYPI_API_TOKEN secret is not set."
+            echo "Configure it under Settings → Secrets and variables → Actions,"
+            echo "or set the repository variable SKIP_PYPI=true to disable PyPI publishing for this repo."
+            exit 1
+          fi
+          python -m pip install --upgrade pip twine
+          twine check dist/*
+          twine upload dist/*

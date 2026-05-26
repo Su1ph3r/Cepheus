@@ -56,3 +56,25 @@ class EscapeTechnique(BaseModel):
     reliability: float = Field(default=0.5, ge=0.0, le=1.0)
     stealth: float = Field(default=0.5, ge=0.0, le=1.0)
     remediation: str = ""
+    cli_flag: str | None = Field(
+        default=None,
+        description=(
+            "Container-runtime flag that closes the primitive when set "
+            "at create time (e.g. '--cap-drop=SYS_ADMIN', "
+            "'--security-opt=no-new-privileges'). When None, the technique "
+            "requires a non-flag remediation (e.g. host-level kernel "
+            "upgrade, network policy, RBAC change). Used by the remediation "
+            "generator in place of regex-mining `remediation` text."
+        ),
+    )
+    verify_command: str | None = Field(
+        default=None,
+        description=(
+            "Shell one-liner that attempts a NON-DESTRUCTIVE proof of "
+            "exploit when run inside a matched container. Used by "
+            "`cepheus verify`. Exit code 0 = technique confirmed; non-zero "
+            "= technique not exploitable in this concrete container. None "
+            "means no automated verifier exists (e.g. kernel CVEs where "
+            "the only confirmation is actual exploitation)."
+        ),
+    )

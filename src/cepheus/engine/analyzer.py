@@ -29,15 +29,20 @@ def _render_poc(technique_id: str, posture: ContainerPosture) -> str:
     """Render a PoC command for a technique, importing poc_templates lazily."""
     try:
         from cepheus.engine.poc_templates import render_poc
-
-        posture_data = {
-            "hostname": posture.hostname,
-            "kernel_version": posture.kernel.version,
-            "runtime": posture.runtime.runtime,
-        }
-        return render_poc(technique_id, posture_data)
     except ImportError:
-        return f"# No PoC template for {technique_id}"
+        # poc_templates is shipped with the package; ImportError here means
+        # the package install is broken, not a missing template. Surface
+        # a recognisable placeholder rather than swallowing the underlying
+        # ImportError raised from inside render_poc — which could mask a
+        # real transitive-dep failure as "no PoC template available".
+        return f"# poc_templates module unavailable for {technique_id}"
+
+    posture_data = {
+        "hostname": posture.hostname,
+        "kernel_version": posture.kernel.version,
+        "runtime": posture.runtime.runtime,
+    }
+    return render_poc(technique_id, posture_data)
 
 
 def _generate_remediations(
@@ -51,22 +56,33 @@ def _generate_remediations(
             continue
         seen_ids.add(technique.id)
 
-        # Extract runtime flag from remediation text if present
-        runtime_flag = None
-        remediation = technique.remediation
-        if "--" in remediation:
-            # Try to extract a flag like "--cap-drop=ALL"
-            for word in remediation.split():
-                if word.startswith("--"):
-                    runtime_flag = word.rstrip(",.")
-                    break
+        # `cli_flag` is the typed field set explicitly on each technique
+        # (v0.3.5+). Fall back to prefix-matching the FIRST word of the
+        # remediation text for techniques that haven't been migrated yet
+        # — graceful for downstream consumers that subclass
+        # EscapeTechnique or define their own.
+        #
+        # Why only the first word: scanning the whole sentence for any
+        # `--flag` token produces inverted advice when the remediation
+        # is descriptive prose (e.g. "If --privileged is set, drop X"
+        # would extract `--privileged` and present it as the *fix*).
+        # Restricting to the leading token captures the documented
+        # "<flag> ..." shape without misreading prose.
+        runtime_flag = technique.cli_flag
+        if runtime_flag is None and technique.remediation:
+            # `.split()[0]` raises IndexError on whitespace-only strings
+            # (e.g. "   " is truthy but split returns []), so call split
+            # then check the result instead of subscripting blind.
+            parts = technique.remediation.split(maxsplit=1)
+            if parts and parts[0].startswith("--"):
+                runtime_flag = parts[0].rstrip(",.")
 
         items.append(
             RemediationItem(
                 technique_id=technique.id,
                 severity=technique.severity,
                 current_state=technique.description,
-                recommended_fix=remediation,
+                recommended_fix=technique.remediation,
                 runtime_flag=runtime_flag,
             )
         )

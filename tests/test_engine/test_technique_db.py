@@ -69,3 +69,35 @@ def test_cve_2024_21626_has_runc_version_prereq():
     runc_prereqs = [p for p in t.prerequisites if p.check_field == "runtime.runc_version"]
     assert len(runc_prereqs) == 1
     assert runc_prereqs[0].check_type == "version_lte"
+
+
+def test_get_all_techniques_returns_isolated_objects():
+    """Regression guard for S1: pre-0.3.5 `get_all_techniques` returned
+    `list(_TECHNIQUES)` — a shallow copy where the inner Pydantic models
+    were SHARED across callers. A caller mutating one technique silently
+    corrupted the global database for every subsequent caller in the
+    process. The deepcopy fix isolates each call."""
+    from cepheus.models.technique import Severity
+
+    first_call = get_all_techniques()
+    original_severity = first_call[0].severity
+
+    # Mutate a returned technique — this would poison the singleton before the fix.
+    first_call[0].severity = Severity.LOW
+
+    # A second call must NOT see the mutation.
+    second_call = get_all_techniques()
+    assert second_call[0].severity == original_severity, (
+        "get_all_techniques must return isolated objects — mutating one "
+        "caller's result must not leak into other callers' results"
+    )
+
+
+def test_get_all_techniques_inner_lists_isolated():
+    """Same isolation property for nested lists (`prerequisites`,
+    `references`, `mitre_attack`) — shallow-copy would have shared
+    these too, even if the outer EscapeTechnique objects were distinct."""
+    first_call = get_all_techniques()
+    first_call[0].references.append("https://attacker.example/poison")
+    second_call = get_all_techniques()
+    assert "https://attacker.example/poison" not in second_call[0].references

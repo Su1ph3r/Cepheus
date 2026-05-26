@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from cepheus.models.technique import (
     EscapeTechnique,
     Prerequisite,
@@ -46,6 +48,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.3,
             remediation="--cap-drop=ALL --cap-add=<needed>",
+            cli_flag="--cap-drop=SYS_ADMIN",
+            verify_command="d=/tmp/_cep_v_$$; mkdir -p $d && mount -t tmpfs -o size=1m tmpfs $d && umount $d && rmdir $d",
         ),
         EscapeTechnique(
             id="cap_sys_admin_cgroup_escape",
@@ -138,6 +142,19 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.5,
             remediation="--cap-drop=SYS_PTRACE --pid=container",
+            cli_flag="--cap-drop=SYS_PTRACE",
+            # No verifier: the previous probe (`ps -p 1 -o stat=`) only
+            # checked that /proc/1 was readable, which is true in every
+            # container regardless of CAP_SYS_PTRACE, so the verifier
+            # reported CONFIRMED 100% of the time and defeated the
+            # false-positive-reduction purpose of `cepheus verify` for
+            # this technique. A real probe would need to call
+            # `ptrace(PTRACE_ATTACH, host_pid, ...)` against a host
+            # process — only meaningful when hostPID is shared, which
+            # the verifier can't determine from inside the container.
+            # Set to None so the outcome is NO_VERIFIER (honest) rather
+            # than always-CONFIRMED (a silent lie).
+            verify_command=None,
         ),
         EscapeTechnique(
             id="cap_dac_read_search",
@@ -166,6 +183,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.7,
             remediation="--cap-drop=DAC_READ_SEARCH",
+            cli_flag="--cap-drop=DAC_READ_SEARCH",
+            verify_command="test -r /etc/shadow && head -c 1 /etc/shadow >/dev/null",
         ),
         EscapeTechnique(
             id="cap_dac_override",
@@ -210,6 +229,17 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.4,
             remediation="--cap-drop=DAC_OVERRIDE and avoid privileged/hostPath mounts",
+            cli_flag="--cap-drop=DAC_OVERRIDE",
+            # Open-for-append-then-close on a root-owned file the
+            # container shouldn't be able to touch without
+            # CAP_DAC_OVERRIDE. /etc/shadow is mode 0640 root:shadow on
+            # most distros so a non-root container without DAC_OVERRIDE
+            # fails. No write is ever performed (append-mode open
+            # triggers the permission check without dirtying the file),
+            # so the probe is strictly non-destructive — replacing the
+            # previous create-and-delete on /var/log/_cepheus_v which
+            # could leak state if interrupted between create and rm.
+            verify_command="exec 3>>/etc/shadow 2>/dev/null && exec 3>&-",
         ),
         EscapeTechnique(
             id="cap_net_admin",
@@ -235,6 +265,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.6,
             remediation="--cap-drop=NET_ADMIN",
+            cli_flag="--cap-drop=NET_ADMIN",
+            verify_command="command -v ip >/dev/null 2>&1 && ip link set lo up",
         ),
         EscapeTechnique(
             id="cap_sys_rawio",
@@ -263,6 +295,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.75,
             stealth=0.2,
             remediation="--cap-drop=SYS_RAWIO",
+            cli_flag="--cap-drop=SYS_RAWIO",
+            verify_command="for d in /dev/sda /dev/vda /dev/nvme0n1; do [ -r $d ] && dd if=$d of=/dev/null bs=1 count=0 2>/dev/null && exit 0; done; exit 1",
         ),
         EscapeTechnique(
             id="ebpf_probe_write_user",
@@ -335,6 +369,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.2,
             remediation="Never mount Docker socket into containers",
+            verify_command="[ -S /var/run/docker.sock ] && [ -w /var/run/docker.sock ]",
         ),
         EscapeTechnique(
             id="procfs_core_pattern",
@@ -375,6 +410,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.85,
             stealth=0.3,
             remediation="Mount /proc read-only or use seccomp",
+            verify_command="exec 3>>/proc/sys/kernel/core_pattern && exec 3>&-",
         ),
         EscapeTechnique(
             id="procfs_sysrq",
@@ -414,6 +450,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.1,
             remediation="Mount /proc read-only",
+            verify_command="exec 3>>/proc/sysrq-trigger && exec 3>&-",
         ),
         EscapeTechnique(
             id="sysfs_hugepages",
@@ -454,6 +491,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.4,
             remediation="Mount /sys read-only",
+            verify_command="exec 3>>/sys/kernel/uevent_helper 2>/dev/null && exec 3>&- 2>/dev/null",
         ),
         EscapeTechnique(
             id="hostpath_mount_etc",
@@ -480,6 +518,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.3,
             remediation="Avoid hostPath mounts or use readOnly",
+            verify_command="[ -d /host/etc ] || [ -d /host-system/etc ] || [ -d /host-root/etc ]",
         ),
         EscapeTechnique(
             id="hostpath_mount_root",
@@ -506,6 +545,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.2,
             remediation="Never mount host root filesystem",
+            verify_command="[ -d /host/var ] || [ -d /host-system/var ] || [ -d /host-root/var ]",
         ),
         EscapeTechnique(
             id="cgroupfs_escape",
@@ -562,6 +602,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.85,
             stealth=0.2,
             remediation="--privileged=false, use --device for specific needs",
+            cli_flag="--privileged=false",
+            verify_command="for d in /dev/sda /dev/vda /dev/nvme0n1 /dev/loop0; do [ -r $d ] && exit 0; done; exit 1",
         ),
         EscapeTechnique(
             id="containerd_sock_mount",
@@ -587,6 +629,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.2,
             remediation="Never mount containerd socket into containers",
+            verify_command="[ -S /run/containerd/containerd.sock ] || [ -S /var/run/containerd/containerd.sock ]",
         ),
         EscapeTechnique(
             id="crio_sock_mount",
@@ -612,6 +655,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.2,
             remediation="Never mount CRI-O socket into containers",
+            verify_command="[ -S /var/run/crio/crio.sock ] || [ -S /run/crio/crio.sock ]",
         ),
         EscapeTechnique(
             id="systemd_cgroup_injection",
@@ -691,6 +735,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.8,
             remediation="Use --ipc=private, restrict /dev/shm size",
+            cli_flag="--ipc=private",
+            verify_command="[ -d /dev/shm ] && [ -w /dev/shm ]",
         ),
         EscapeTechnique(
             id="proc_fd_symlink_traversal",
@@ -735,6 +781,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.5,
             remediation="Restrict /proc access, use read-only /proc mounts",
+            verify_command="[ -L /proc/self/fd/0 ] && readlink /proc/self/fd/0 >/dev/null",
         ),
         EscapeTechnique(
             id="device_mapper_access",
@@ -802,6 +849,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.4,
             remediation="Mount /proc read-only or use seccomp",
+            verify_command="exec 3>>/proc/sys/vm/drop_caches 2>/dev/null && exec 3>&- 2>/dev/null",
         ),
         # ── KERNEL (17) ──────────────────────────────────────────────
         EscapeTechnique(
@@ -1330,6 +1378,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.7,
             remediation="automountServiceAccountToken: false",
+            verify_command="[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]",
         ),
         EscapeTechnique(
             id="k8s_kubelet_api",
@@ -1540,6 +1589,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.8,
             remediation="Block 169.254.169.254 via network policy",
+            verify_command="command -v curl >/dev/null 2>&1 && curl -sf --max-time 2 http://169.254.169.254/ >/dev/null",
         ),
         EscapeTechnique(
             id="lsm_apparmor_unconfined",
@@ -1566,6 +1616,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.5,
             remediation="Apply AppArmor profile: --security-opt apparmor=docker-default",
+            cli_flag="--security-opt apparmor=docker-default",
+            verify_command="[ ! -f /proc/self/attr/current ] || grep -q 'unconfined' /proc/self/attr/current 2>/dev/null",
         ),
         EscapeTechnique(
             id="lsm_selinux_unconfined",
@@ -1610,6 +1662,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.5,
             remediation="Enable SELinux: --security-opt label=type:container_t",
+            cli_flag="--security-opt label=type:container_t",
+            verify_command="[ ! -f /sys/fs/selinux/enforce ] || ! grep -q '1' /sys/fs/selinux/enforce 2>/dev/null",
         ),
         EscapeTechnique(
             id="k8s_node_proxy",
@@ -1799,6 +1853,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.3,
             remediation="--cap-drop=ALL --security-opt seccomp=default",
+            cli_flag="--cap-drop=SYS_ADMIN",
         ),
         EscapeTechnique(
             id="privileged_docker_sock",
@@ -1863,6 +1918,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.85,
             stealth=0.7,
             remediation="--cap-drop=NET_RAW, block metadata endpoint",
+            cli_flag="--cap-drop=NET_RAW",
         ),
         EscapeTechnique(
             id="writable_proc_privileged",
@@ -1894,6 +1950,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.2,
             remediation="--privileged=false, mount /proc read-only",
+            cli_flag="--privileged=false",
         ),
         EscapeTechnique(
             id="user_ns_kernel_exploit",
@@ -1956,6 +2013,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.3,
             remediation="Apply AppArmor profile: --security-opt apparmor=docker-default",
+            cli_flag="--security-opt apparmor=docker-default",
         ),
         # ── INFO_DISCLOSURE (4) ───────────────────────────────────────
         EscapeTechnique(
@@ -2008,6 +2066,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.8,
             remediation="IMDSv2 with hop limit, block metadata endpoint",
+            verify_command="command -v curl >/dev/null 2>&1 && curl -sf --max-time 2 http://169.254.169.254/ >/dev/null",
         ),
         EscapeTechnique(
             id="k8s_configmap_secrets",
@@ -2041,6 +2100,7 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.85,
             stealth=0.8,
             remediation="Least-privilege RBAC, encrypt secrets at rest",
+            verify_command="[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ]",
         ),
         EscapeTechnique(
             id="docker_env_inspection",
@@ -2073,11 +2133,19 @@ def _build_techniques() -> list[EscapeTechnique]:
 
 
 def get_all_techniques() -> list[EscapeTechnique]:
-    """Return all 65 escape techniques."""
+    """Return all 65 escape techniques.
+
+    Returns a deep copy of the lazily-built singleton so that callers
+    mutating a returned technique (test fixtures, SDK consumers that
+    monkey-patch a `cli_flag` or `verify_command` for sandboxed runs)
+    don't silently corrupt subsequent callers in the same process. The
+    deep-copy cost is ~65 model clones per call — sub-millisecond,
+    invisible to the analyze pipeline.
+    """
     global _TECHNIQUES
     if _TECHNIQUES is None:
         _TECHNIQUES = _build_techniques()
-    return list(_TECHNIQUES)
+    return copy.deepcopy(_TECHNIQUES)
 
 
 def get_techniques_by_category(category: TechniqueCategory) -> list[EscapeTechnique]:
