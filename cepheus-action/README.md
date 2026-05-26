@@ -7,11 +7,11 @@ gates and uploads SARIF to GitHub Code Scanning.
 > **Note**: This directory is the source of truth for the action. At each
 > release of Cepheus we extract these files to the standalone
 > `Su1ph3r/cepheus-action` repo so users can reference it as
-> `Su1ph3r/cepheus-action@v0.3.5`. The action itself is thin — it just
+> `Su1ph3r/cepheus-action@v0.4.0`. The action itself is thin — it just
 > installs Cepheus and calls `cepheus ci` — so it rarely needs to change
 > independently.
 >
-> The action ships with `cepheus-version: '0.3.5'` as the default install
+> The action ships with `cepheus-version: '0.4.0'` as the default install
 > target so consumers get a reproducible cepheus version on every action
 > invocation. Override with `cepheus-version: <pep440>` if you need a
 > different release.
@@ -36,7 +36,7 @@ jobs:
         run: docker build -t my-app:${{ github.sha }} .
 
       - name: Cepheus scan
-        uses: Su1ph3r/cepheus-action@v0.3.5
+        uses: Su1ph3r/cepheus-action@v0.4.0
         with:
           image: my-app:${{ github.sha }}
           max-severity: critical
@@ -58,7 +58,7 @@ higher.
 | `fail-on-new` | no | `false` | Fail if any chain in current isn't in `baseline`. Requires `baseline`. |
 | `output` | no | `cepheus.sarif` | SARIF output file. |
 | `upload-sarif` | no | `true` | Auto-upload to Code Scanning. Requires `security-events: write`. |
-| `cepheus-version` | no | `0.3.5` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. |
+| `cepheus-version` | no | `0.4.0` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. |
 | `runtime` | no | `docker` | `docker` or `podman`. |
 | `python-version` | no | `3.12` | Python version for Cepheus install. |
 
@@ -99,7 +99,7 @@ treat a corrupt scan as "all clear":
 ### Severity-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.3.5
+- uses: Su1ph3r/cepheus-action@v0.4.0
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -110,7 +110,7 @@ Simple. Block any container that ships a critical chain.
 ### Regression-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.3.5
+- uses: Su1ph3r/cepheus-action@v0.4.0
   with:
     image: my-app:${{ github.sha }}
     baseline: .github/cepheus-baseline.sarif
@@ -123,7 +123,7 @@ chains, lets existing ones through.
 ### Both
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.3.5
+- uses: Su1ph3r/cepheus-action@v0.4.0
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -145,7 +145,7 @@ posture outside CI and reference it in the workflow:
 #   gh api repos/ORG/REPO/contents/.github/prod-posture.json ...
 
 # Step 2 (in CI):
-- uses: Su1ph3r/cepheus-action@v0.3.5
+- uses: Su1ph3r/cepheus-action@v0.4.0
   with:
     posture-file: .github/prod-posture.json
     max-severity: high
@@ -174,7 +174,7 @@ permissions:
 ## Versioning
 
 The action is version-locked to the Cepheus release it ships alongside.
-`@v0.3.5` installs Cepheus 0.3.5. `@main` tracks the latest dev version
+`@v0.4.0` installs Cepheus 0.4.0. `@main` tracks the latest dev version
 (not recommended for CI). Pin to a specific tag in production workflows.
 
 ## License

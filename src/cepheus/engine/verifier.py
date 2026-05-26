@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 
@@ -145,6 +146,41 @@ def _execute_in_container(
         return _RC_INFRA, f"{type(exc).__name__}: {exc}"
 
 
+def _classify(rc: int) -> VerifyOutcome:
+    """Map a verifier exit code to a VerifyOutcome."""
+    if rc == 0:
+        return VerifyOutcome.CONFIRMED
+    if rc in (_RC_TIMEOUT, _RC_NO_RUNTIME, _RC_INFRA):
+        return VerifyOutcome.ERROR
+    return VerifyOutcome.NOT_CONFIRMED
+
+
+def _verify_one(
+    tech,
+    container_id: str,
+    runtime: str,
+    timeout: int,
+) -> TechniqueVerification:
+    """Verify a single technique. Pure function over the (tech, container_id)
+    pair so it can be dispatched safely from a ThreadPoolExecutor."""
+    if not tech.verify_command:
+        return TechniqueVerification(
+            technique_id=tech.id,
+            technique_name=tech.name,
+            severity=tech.severity.value,
+            outcome=VerifyOutcome.NO_VERIFIER,
+        )
+    rc, stderr = _execute_in_container(container_id, runtime, tech.verify_command, timeout)
+    return TechniqueVerification(
+        technique_id=tech.id,
+        technique_name=tech.name,
+        severity=tech.severity.value,
+        outcome=_classify(rc),
+        exit_code=rc,
+        stderr=stderr or None,
+    )
+
+
 def verify_analysis(
     result: AnalysisResult,
     container_id: str,
@@ -153,6 +189,7 @@ def verify_analysis(
     timeout: int = 10,
     only_severities: set[str] | None = None,
     only_technique_ids: set[str] | None = None,
+    parallel: int | None = None,
 ) -> VerificationReport:
     """Walk an AnalysisResult and attempt live verification of each
     matched technique inside the target container.
@@ -166,53 +203,51 @@ def verify_analysis(
             in this set. Useful for `--all-critical` style invocation.
         only_technique_ids: When set, only verify techniques whose id is
             in this set. Mutually-OR'd with only_severities.
+        parallel: Number of verifier probes to run concurrently. Defaults
+            to ``min(8, len(matched_techniques))`` — most images tolerate
+            8 concurrent `docker exec` calls cleanly. Pass 1 for fully
+            sequential (useful when probes have IO contention).
 
     Returns a VerificationReport with one entry per *unique* matched
-    technique (deduplicated by technique.id across chains).
+    technique (deduplicated by technique.id across chains), in the
+    same deterministic order whether run serial or parallel — results
+    are sorted by (severity_rank desc, technique_id) so reports stay
+    stable across runs.
     """
+    # 1. Dedup + filter (sequential — cheap, deterministic).
     seen_ids: set[str] = set()
-    results: list[TechniqueVerification] = []
-
+    to_verify = []
     for chain in result.chains:
         for step in chain.steps:
             tech = step.technique
             if tech is None or tech.id in seen_ids:
                 continue
             seen_ids.add(tech.id)
-
             if only_severities is not None and tech.severity.value not in only_severities:
                 continue
             if only_technique_ids is not None and tech.id not in only_technique_ids:
                 continue
+            to_verify.append(tech)
 
-            if not tech.verify_command:
-                results.append(
-                    TechniqueVerification(
-                        technique_id=tech.id,
-                        technique_name=tech.name,
-                        severity=tech.severity.value,
-                        outcome=VerifyOutcome.NO_VERIFIER,
-                    )
-                )
-                continue
+    # 2. Execute (parallel — N-at-a-time over `docker exec`).
+    if not to_verify:
+        return VerificationReport(results=[])
 
-            rc, stderr = _execute_in_container(container_id, runtime, tech.verify_command, timeout)
-            if rc == 0:
-                outcome = VerifyOutcome.CONFIRMED
-            elif rc in (_RC_TIMEOUT, _RC_NO_RUNTIME, _RC_INFRA):
-                outcome = VerifyOutcome.ERROR
-            else:
-                outcome = VerifyOutcome.NOT_CONFIRMED
+    workers = parallel if parallel is not None else min(8, len(to_verify))
+    workers = max(1, workers)
 
-            results.append(
-                TechniqueVerification(
-                    technique_id=tech.id,
-                    technique_name=tech.name,
-                    severity=tech.severity.value,
-                    outcome=outcome,
-                    exit_code=rc,
-                    stderr=stderr or None,
-                )
-            )
+    if workers == 1:
+        # Skip the thread pool when no parallelism is requested — keeps
+        # tracebacks clean for single-threaded debugging.
+        results = [_verify_one(t, container_id, runtime, timeout) for t in to_verify]
+    else:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cepheus-verify") as pool:
+            # `map` preserves input order, so the result order corresponds
+            # to to_verify order before re-sorting below.
+            results = list(pool.map(lambda t: _verify_one(t, container_id, runtime, timeout), to_verify))
+
+    # 3. Sort for deterministic output regardless of execution order.
+    severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+    results.sort(key=lambda r: (-severity_rank.get(r.severity, 0), r.technique_id))
 
     return VerificationReport(results=results)

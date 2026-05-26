@@ -341,3 +341,123 @@ def test_verify_command_field_populated_on_safe_subset():
     }
     for tid in must_have_verifier:
         assert by_id[tid].verify_command, f"{tid} should have verify_command populated"
+
+
+def test_verifier_coverage_meets_minimum():
+    """Regression guard against verifier-coverage backsliding. v0.4.0 ships
+    47/65 techniques with verify_command (72% coverage). This test fails if
+    the coverage drops below the v0.4.0 floor — preventing accidental
+    deletion of probes during refactoring."""
+    from cepheus.engine.technique_db import get_all_techniques
+
+    techs = get_all_techniques()
+    with_v = [t for t in techs if t.verify_command]
+    # Floor: 40 techniques (v0.4.0 ships 47; allow small downward drift for
+    # legitimate removals — anything above 40 keeps the differentiator intact).
+    assert len(with_v) >= 40, (
+        f"Verifier coverage dropped below 40/65 floor — currently {len(with_v)}/65. "
+        f"Adding new techniques without verify_command is fine; REMOVING existing "
+        f"verify_commands erodes Cepheus's primary moat."
+    )
+
+
+def test_verifier_coverage_complete_for_critical_categories():
+    """Mount, combinatorial, and info_disclosure categories should be 100%
+    verified — they're the categories where non-destructive probes are
+    most natural and most diagnostic. Capability should be at least 8/9
+    (cap_sys_ptrace is intentionally NO_VERIFIER per Q2 fix)."""
+    from cepheus.engine.technique_db import get_all_techniques
+    from collections import defaultdict
+
+    by_cat: dict[str, list] = defaultdict(list)
+    for t in get_all_techniques():
+        by_cat[t.category.value].append(t)
+
+    def coverage(cat: str) -> tuple[int, int]:
+        verified = sum(1 for t in by_cat[cat] if t.verify_command)
+        return verified, len(by_cat[cat])
+
+    mount_v, mount_t = coverage("mount")
+    assert mount_v == mount_t, f"mount category should be 100% verified, got {mount_v}/{mount_t}"
+
+    combo_v, combo_t = coverage("combinatorial")
+    assert combo_v == combo_t, f"combinatorial category should be 100% verified, got {combo_v}/{combo_t}"
+
+    info_v, info_t = coverage("info_disclosure")
+    assert info_v == info_t, f"info_disclosure category should be 100% verified, got {info_v}/{info_t}"
+
+    cap_v, cap_t = coverage("capability")
+    assert cap_v >= cap_t - 1, (
+        f"capability category should be all-but-one verified (cap_sys_ptrace is "
+        f"the legitimate None), got {cap_v}/{cap_t}"
+    )
+
+
+def test_verify_analysis_parallel_execution(monkeypatch):
+    """Regression guard for the parallel verify path. With multiple
+    matched techniques and parallel>1, the probes should run concurrently
+    (not sequentially) and produce the same results as serial mode."""
+    import threading
+    import time
+
+    concurrent_high_water = [0]
+    in_flight = [0]
+    lock = threading.Lock()
+
+    def fake_run(*a, **kw):
+        with lock:
+            in_flight[0] += 1
+            if in_flight[0] > concurrent_high_water[0]:
+                concurrent_high_water[0] = in_flight[0]
+        # Hold for 50ms so concurrent probes overlap observably.
+        time.sleep(0.05)
+        with lock:
+            in_flight[0] -= 1
+        return (0, "")
+
+    monkeypatch.setattr("cepheus.engine.verifier._execute_in_container", fake_run)
+
+    techs = [_tech(f"t{i}") for i in range(8)]
+    result = _result(techs)
+    report = verify_analysis(result, container_id="c", runtime="docker", parallel=4)
+    # All 8 verified; some ran concurrently (high water > 1).
+    assert len(report.results) == 8
+    assert concurrent_high_water[0] > 1, (
+        f"Expected concurrent verifier execution; max concurrent was {concurrent_high_water[0]}"
+    )
+
+
+def test_verify_analysis_parallel_results_deterministically_ordered(monkeypatch):
+    """Parallel execution must still produce stable, deterministic result
+    ordering across runs — otherwise SARIF / JSON diff-ability is lost."""
+    monkeypatch.setattr(
+        "cepheus.engine.verifier._execute_in_container",
+        lambda *a, **kw: (0, ""),
+    )
+    techs = [
+        _tech("low_t", Severity.LOW),
+        _tech("crit_a", Severity.CRITICAL),
+        _tech("med_t", Severity.MEDIUM),
+        _tech("crit_b", Severity.CRITICAL),
+        _tech("high_t", Severity.HIGH),
+    ]
+    result = _result(techs)
+    r1 = verify_analysis(result, container_id="c", runtime="docker", parallel=4)
+    r2 = verify_analysis(result, container_id="c", runtime="docker", parallel=4)
+    assert [t.technique_id for t in r1.results] == [t.technique_id for t in r2.results]
+    # Severity-desc ordering: critical first (alpha-sorted within), then high, then medium, then low.
+    assert [t.technique_id for t in r1.results] == ["crit_a", "crit_b", "high_t", "med_t", "low_t"]
+
+
+def test_verify_analysis_parallel_one_equals_serial(monkeypatch):
+    """parallel=1 should skip the thread pool entirely (debuggability)
+    and produce the same results as the default."""
+    monkeypatch.setattr(
+        "cepheus.engine.verifier._execute_in_container",
+        lambda *a, **kw: (0, ""),
+    )
+    result = _result([_tech(f"t{i}") for i in range(3)])
+    r_serial = verify_analysis(result, container_id="c", runtime="docker", parallel=1)
+    r_auto = verify_analysis(result, container_id="c", runtime="docker", parallel=None)
+    assert [t.technique_id for t in r_serial.results] == [t.technique_id for t in r_auto.results]
+    assert r_serial.confirmed_count == r_auto.confirmed_count

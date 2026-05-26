@@ -159,3 +159,74 @@ def test_verify_terminal_format_renders_table(monkeypatch):
     # the test runner has; check for the summary line that's always present.
     assert "Summary:" in result.output
     assert "confirmed" in result.output
+
+
+def test_verify_sarif_format_to_file(monkeypatch, tmp_path):
+    """--format sarif -o FILE writes a SARIF 2.1.0 log with one result
+    per verified technique. New in v0.4.0."""
+    _patch_all_confirmed(monkeypatch)
+    out = tmp_path / "verify.sarif"
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "-c",
+            "test-container",
+            "--posture",
+            str(FIXTURE_T1),
+            "--format",
+            "sarif",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["version"] == "2.1.0"
+    assert "runs" in data and len(data["runs"]) == 1
+    run = data["runs"][0]
+    assert run["properties"]["container-id"] == "test-container"
+    assert run["properties"]["verify-confirmed"] >= 1
+    # Every result references a rule that's in tool.driver.rules.
+    rule_ids = {r["id"] for r in run["tool"]["driver"]["rules"]}
+    for res in run["results"]:
+        assert res["ruleId"] in rule_ids, f"orphan ruleId {res['ruleId']} not in rules"
+
+
+def test_verify_parallel_flag_accepted(monkeypatch):
+    """--parallel/-j flag should be accepted by the CLI and pass through."""
+    captured_kwargs = {}
+    real_verify = __import__("cepheus.engine.verifier", fromlist=["verify_analysis"]).verify_analysis
+
+    def fake_verify(*args, **kw):
+        captured_kwargs.update(kw)
+        return real_verify(*args, **kw)
+
+    monkeypatch.setattr("cepheus.engine.verifier.verify_analysis", fake_verify)
+    monkeypatch.setattr(
+        "cepheus.engine.verifier._execute_in_container",
+        lambda *a, **kw: (0, ""),
+    )
+    result = runner.invoke(app, ["verify", "-c", "c1", "--posture", str(FIXTURE_T1), "--parallel", "4"])
+    assert result.exit_code == 0, result.output
+    assert captured_kwargs.get("parallel") == 4
+
+
+def test_verify_parallel_zero_means_auto(monkeypatch):
+    """parallel=0 (the default) should resolve to None, letting verify_analysis auto-select."""
+    captured_kwargs = {}
+    real_verify = __import__("cepheus.engine.verifier", fromlist=["verify_analysis"]).verify_analysis
+
+    def fake_verify(*args, **kw):
+        captured_kwargs.update(kw)
+        return real_verify(*args, **kw)
+
+    monkeypatch.setattr("cepheus.engine.verifier.verify_analysis", fake_verify)
+    monkeypatch.setattr(
+        "cepheus.engine.verifier._execute_in_container",
+        lambda *a, **kw: (0, ""),
+    )
+    result = runner.invoke(app, ["verify", "-c", "c1", "--posture", str(FIXTURE_T1)])
+    assert result.exit_code == 0, result.output
+    assert captured_kwargs.get("parallel") is None

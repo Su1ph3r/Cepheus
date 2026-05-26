@@ -288,3 +288,154 @@ def write_sarif(result: AnalysisResult, path: str | Path) -> Path:
     data = generate_sarif(result)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+# Verify-side SARIF: one result per VERIFIED technique (not per chain).
+# Used by `cepheus verify --format sarif` so verifier outcomes upload
+# to GitHub Code Scanning alongside (or instead of) the static-analysis
+# SARIF. The result's ``level`` reflects the verifier outcome:
+#   CONFIRMED     → error (the primitive actually works in this container)
+#   NOT_CONFIRMED → note  (static match was a false positive — informational)
+#   NO_VERIFIER   → warning (operator should manually check)
+#   ERROR         → warning (verifier infra failure — needs operator attention)
+_VERIFY_OUTCOME_TO_LEVEL: dict[str, str] = {
+    "CONFIRMED": "error",
+    "NOT_CONFIRMED": "note",
+    "NO_VERIFIER": "warning",
+    "ERROR": "warning",
+}
+
+
+def _verify_result_to_sarif(tv: Any, posture_uri: str) -> dict[str, Any]:
+    """Build a SARIF result entry from a TechniqueVerification."""
+    outcome = tv.outcome.value if hasattr(tv.outcome, "value") else str(tv.outcome)
+    level = _VERIFY_OUTCOME_TO_LEVEL.get(outcome, "warning")
+    message_lines = [
+        f"Verifier outcome: **{outcome}** "
+        f"(severity={tv.severity}, exit_code={tv.exit_code if tv.exit_code is not None else 'n/a'}).",
+    ]
+    if tv.stderr:
+        message_lines.append("")
+        message_lines.append("**stderr:**")
+        message_lines.append("```")
+        message_lines.append(_sanitize_for_code_fence(tv.stderr))
+        message_lines.append("```")
+    return {
+        "ruleId": tv.technique_id,
+        "level": level,
+        "message": {
+            "text": (
+                f"{tv.technique_id} ({tv.technique_name}) — verifier outcome: {outcome}. "
+                f"Exit code: {tv.exit_code if tv.exit_code is not None else 'n/a'}."
+            ),
+            "markdown": "\n".join(message_lines),
+        },
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": posture_uri, "uriBaseId": "%SRCROOT%"},
+                    "region": {"startLine": 1},
+                },
+                "logicalLocations": [
+                    {
+                        "name": tv.technique_id,
+                        "kind": "type",
+                        "fullyQualifiedName": f"cepheus.technique.{tv.technique_id}",
+                    }
+                ],
+            }
+        ],
+        "properties": {
+            "verifier-outcome": outcome,
+            "verifier-exit-code": tv.exit_code,
+            "severity": tv.severity,
+        },
+        "partialFingerprints": {
+            # Fingerprint by technique id + outcome so re-running with a
+            # changed outcome (CONFIRMED → NOT_CONFIRMED, e.g. after a
+            # cap drop) opens a new finding instead of reusing the old one.
+            "verifyFingerprint/v1": f"{tv.technique_id}:{outcome}",
+        },
+    }
+
+
+def generate_verify_sarif(report: Any, container_id: str) -> dict[str, Any]:
+    """Build a SARIF 2.1.0 log dict from a VerificationReport.
+
+    Unlike ``generate_sarif`` (which emits one result per chain), this
+    emits one result per VERIFIED technique. Severity-rank ordering of
+    results is preserved from the verifier — operators see CRITICAL
+    confirmed primitives at the top of Code Scanning's Security tab.
+
+    The ``rules`` set is derived from the techniques that produced
+    results, so the SARIF run is self-contained (no orphan ruleIds).
+    """
+    rules_by_id: dict[str, dict[str, Any]] = {}
+    safe_container = quote(container_id or "unknown", safe="")
+    posture_uri = f"container://{safe_container}"
+
+    # Build minimal rule descriptors from the technique db so the SARIF
+    # is self-contained and renderable without the static-analysis SARIF.
+    from cepheus.engine.technique_db import get_technique_by_id
+
+    results = []
+    for tv in report.results:
+        if tv.technique_id not in rules_by_id:
+            tech = get_technique_by_id(tv.technique_id)
+            if tech is not None:
+                rules_by_id[tv.technique_id] = _technique_to_rule(tech)
+            else:
+                # Fallback minimal rule if the technique isn't in the DB
+                # (shouldn't happen in practice but keeps the SARIF valid).
+                rules_by_id[tv.technique_id] = {
+                    "id": tv.technique_id,
+                    "name": _sarif_safe_name(tv.technique_name),
+                    "shortDescription": {"text": tv.technique_name},
+                    "defaultConfiguration": {"level": "warning"},
+                }
+        results.append(_verify_result_to_sarif(tv, posture_uri))
+
+    return {
+        "$schema": SARIF_SCHEMA,
+        "version": SARIF_VERSION,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "Cepheus",
+                        "fullName": "Cepheus — Container Escape Verifier",
+                        "version": __version__,
+                        "semanticVersion": __version__,
+                        "informationUri": "https://github.com/Su1ph3r/Cepheus",
+                        "organization": "Su1ph3r",
+                        "rules": list(rules_by_id.values()),
+                    }
+                },
+                "results": results,
+                "invocations": [
+                    {
+                        "executionSuccessful": True,
+                    }
+                ],
+                "originalUriBaseIds": {
+                    "%SRCROOT%": {"uri": "file:///"},
+                },
+                "properties": {
+                    "container-id": container_id,
+                    "verify-confirmed": report.confirmed_count,
+                    "verify-not-confirmed": report.not_confirmed_count,
+                    "verify-no-verifier": report.no_verifier_count,
+                    "verify-error": report.error_count,
+                    "verify-total": len(report.results),
+                },
+            }
+        ],
+    }
+
+
+def write_verify_sarif(report: Any, container_id: str, path: str | Path) -> Path:
+    """Write a verify-mode SARIF 2.1.0 log to a JSON file."""
+    path = Path(path)
+    data = generate_verify_sarif(report, container_id)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path

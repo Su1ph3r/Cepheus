@@ -78,6 +78,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.85,
             stealth=0.4,
             remediation="Use cgroup v2 or drop CAP_SYS_ADMIN",
+            # cgroup v1 release_agent escape requires a writable cgroup
+            # tree. Probe writability of any cgroup.procs file — the v1
+            # paths under /sys/fs/cgroup/<controller>/cgroup.procs.
+            # Non-destructive: tests the open-for-write permission without
+            # writing.
+            verify_command="for f in /sys/fs/cgroup/memory/cgroup.procs /sys/fs/cgroup/cpu/cgroup.procs /sys/fs/cgroup/devices/cgroup.procs; do exec 3>>$f 2>/dev/null && exec 3>&- && exit 0; done; exit 1",
         ),
         EscapeTechnique(
             id="cap_sys_admin_bpf",
@@ -109,6 +115,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.6,
             remediation="Drop CAP_SYS_ADMIN and CAP_BPF",
+            # bpftool prog list requires CAP_BPF (kernel >= 5.8) or
+            # CAP_SYS_ADMIN to enumerate loaded BPF programs. Returns 0
+            # if the call succeeds (the cap is held); non-zero on EPERM.
+            # Falls back to checking /sys/kernel/btf/vmlinux which is
+            # root-readable and indicates BPF subsystem availability.
+            verify_command="(command -v bpftool >/dev/null 2>&1 && bpftool prog list >/dev/null 2>&1) || [ -r /sys/kernel/btf/vmlinux ]",
         ),
         EscapeTechnique(
             id="cap_sys_ptrace",
@@ -336,6 +348,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.7,
             remediation="Drop CAP_SYS_ADMIN and CAP_BPF, enable seccomp",
+            # Same probe as cap_sys_admin_bpf — bpftool requires the same
+            # capabilities that bpf_probe_write_user does. Confirms the
+            # BPF call surface is reachable from this container.
+            verify_command="(command -v bpftool >/dev/null 2>&1 && bpftool prog list >/dev/null 2>&1) || [ -r /sys/kernel/btf/vmlinux ]",
         ),
         # ── MOUNT (15) ───────────────────────────────────────────────
         EscapeTechnique(
@@ -577,6 +593,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.4,
             remediation="Use cgroup v2, mount cgroups read-only",
+            # Tests writability of the cgroup hierarchy — opens any v1
+            # controller's cgroup.procs file for append (non-destructive)
+            # and immediately closes. Returns 0 iff the kernel honours
+            # writes (which requires both DAC perms AND CAP_SYS_ADMIN
+            # for /sys/fs/cgroup on non-privileged containers).
+            verify_command="for f in /sys/fs/cgroup/memory/cgroup.procs /sys/fs/cgroup/cpu/cgroup.procs; do exec 3>>$f 2>/dev/null && exec 3>&- && exit 0; done; exit 1",
         ),
         EscapeTechnique(
             id="devfs_access",
@@ -693,6 +715,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.3,
             remediation="Use cgroup v2, mount cgroups read-only, drop CAP_SYS_ADMIN",
+            # systemd unit injection requires writable systemd cgroup
+            # hierarchy. Probe the systemd-specific paths used by
+            # systemd-run --scope abuse patterns.
+            verify_command="for f in /sys/fs/cgroup/systemd/cgroup.procs /sys/fs/cgroup/systemd.slice/cgroup.subtree_control; do exec 3>>$f 2>/dev/null && exec 3>&- && exit 0; done; exit 1",
         ),
         EscapeTechnique(
             id="tmpfs_shm_cross_container",
@@ -813,6 +839,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.5,
             stealth=0.3,
             remediation="Remove device-mapper access, drop CAP_SYS_ADMIN",
+            # /dev/mapper/control is the device-mapper ioctl entry; its
+            # presence + readability indicates the container can issue
+            # dm_ioctl calls (requires CAP_SYS_ADMIN to actually use).
+            verify_command="[ -c /dev/mapper/control ] && [ -r /dev/mapper/control ]",
         ),
         EscapeTechnique(
             id="vm_param_manipulation",
@@ -1310,6 +1340,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.5,
             stealth=0.3,
             remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+            # BuildKit exploitation requires reachability to either the
+            # Docker socket or a dedicated BuildKit daemon socket.
+            verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
         ),
         EscapeTechnique(
             id="cve_2024_23652",
@@ -1346,6 +1379,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.2,
             remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+            # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
+            verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
         ),
         # ── RUNTIME (14) ─────────────────────────────────────────────
         EscapeTechnique(
@@ -1409,6 +1444,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.5,
             remediation="Enable kubelet authentication and authorization",
+            # Probes kubelet on the node's default-gateway IP at port 10250.
+            # `curl -k` accepts the kubelet's self-signed cert; `--max-time 2`
+            # caps probe time. Returns 0 on any HTTP response (kubelet
+            # reachable from this pod, indicating either flat network or
+            # missing NetworkPolicy isolation).
+            verify_command='command -v curl >/dev/null 2>&1 && gw=$(awk \'$2 == "00000000" {printf "%d.%d.%d.%d", "0x"substr($3,7,2), "0x"substr($3,5,2), "0x"substr($3,3,2), "0x"substr($3,1,2); exit}\' /proc/self/net/route 2>/dev/null) && [ -n "$gw" ] && curl -ksf --max-time 2 "https://${gw}:10250/healthz" >/dev/null 2>&1',
         ),
         EscapeTechnique(
             id="k8s_etcd_access",
@@ -1451,6 +1492,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.3,
             remediation="Restrict etcd access with TLS client certs",
+            # Probes etcd's well-known cluster DNS name + control-plane IP
+            # on port 2379. Reachability from a workload pod implies a
+            # misconfigured NetworkPolicy (etcd should never be on the
+            # pod network in a hardened cluster).
+            verify_command='command -v curl >/dev/null 2>&1 && (curl -ksf --max-time 2 "https://etcd.kube-system.svc:2379/version" >/dev/null 2>&1 || ([ -n "$KUBERNETES_SERVICE_HOST" ] && curl -ksf --max-time 2 "https://${KUBERNETES_SERVICE_HOST}:2379/version" >/dev/null 2>&1))',
         ),
         EscapeTechnique(
             id="docker_api_unauth",
@@ -1476,6 +1522,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.3,
             remediation="Enable TLS on Docker daemon socket",
+            # Probes both the unix socket and the TCP 2375 unauth port.
+            # Either reachable means Docker API is exposed without auth.
+            verify_command="command -v curl >/dev/null 2>&1 && (curl -sf --max-time 2 --unix-socket /var/run/docker.sock http://localhost/_ping >/dev/null 2>&1 || curl -sf --max-time 2 http://localhost:2375/_ping >/dev/null 2>&1)",
         ),
         EscapeTechnique(
             id="containerd_shim_escape",
@@ -1516,6 +1565,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.5,
             stealth=0.4,
             remediation="Update containerd to latest",
+            # containerd shim exploit requires reachability to either the
+            # containerd UNIX socket or the shim's abstract socket.
+            verify_command="[ -S /run/containerd/containerd.sock ] || [ -S /var/run/containerd/containerd.sock ]",
         ),
         EscapeTechnique(
             id="runc_cve_2019_5736",
@@ -1692,6 +1744,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.65,
             stealth=0.6,
             remediation="Restrict kubelet proxy access via RBAC",
+            # Kubelet proxy abuse requires a usable SA token AND curl-class
+            # tooling to make the API call. Probes both prerequisites.
+            verify_command="[ -r /var/run/secrets/kubernetes.io/serviceaccount/token ] && command -v curl >/dev/null 2>&1",
         ),
         EscapeTechnique(
             id="cve_2025_23266",
@@ -1725,6 +1780,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.4,
             remediation="Upgrade NVIDIA Container Toolkit to >= 1.17.8 or GPU Operator to >= 25.3.1.",
+            # NVIDIAScape needs the NVIDIA Container Toolkit to be the
+            # one launching this container. Probe for NVIDIA device
+            # presence — the necessary precondition for the OCI hook
+            # to have run.
+            verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
         ),
         EscapeTechnique(
             id="cve_2024_0132",
@@ -1757,6 +1817,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.8,
             stealth=0.3,
             remediation="Upgrade NVIDIA Container Toolkit to >= 1.16.2.",
+            # Same precondition as CVE-2025-23266: NVIDIA Container Toolkit
+            # must have been the launcher. Probe device presence.
+            verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
         ),
         EscapeTechnique(
             id="cve_2025_1974",
@@ -1821,6 +1884,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.3,
             remediation="Upgrade Docker Desktop to the latest patched version.",
+            # Docker Desktop-specific markers: /run/host-services mount
+            # (Docker Desktop's host bridge) or 'docker-desktop' in the
+            # kernel version string (LinuxKit-based VM).
+            verify_command="[ -d /run/host-services ] || grep -q -i 'docker.desktop\\|linuxkit' /proc/version 2>/dev/null",
         ),
         # ── COMBINATORIAL (6) ────────────────────────────────────────
         EscapeTechnique(
@@ -1854,6 +1921,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.3,
             remediation="--cap-drop=ALL --security-opt seccomp=default",
             cli_flag="--cap-drop=SYS_ADMIN",
+            # Combination: CAP_SYS_ADMIN present (CapEff ends in 'ffffff')
+            # AND seccomp disabled (Seccomp: 0 in /proc/self/status).
+            verify_command="grep -q 'CapEff:.*[fF][fF][fF][fF][fF][fF]' /proc/self/status 2>/dev/null && grep -qE 'Seccomp:[[:space:]]*0' /proc/self/status 2>/dev/null",
         ),
         EscapeTechnique(
             id="privileged_docker_sock",
@@ -1884,6 +1954,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.98,
             stealth=0.1,
             remediation="Never run privileged with Docker socket",
+            # Combination: writable Docker socket AND the all-caps marker
+            # (CapEff:.*ffffff) of a privileged container.
+            verify_command="[ -S /var/run/docker.sock ] && [ -w /var/run/docker.sock ] && grep -q 'CapEff:.*[fF][fF][fF][fF][fF][fF]' /proc/self/status 2>/dev/null",
         ),
         EscapeTechnique(
             id="cap_net_raw_metadata",
@@ -1919,6 +1992,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.7,
             remediation="--cap-drop=NET_RAW, block metadata endpoint",
             cli_flag="--cap-drop=NET_RAW",
+            # Combination: metadata endpoint reachable AND a network-capable
+            # binary available to actually mount the ARP-spoof / IMDS read.
+            verify_command="command -v curl >/dev/null 2>&1 && curl -sf --max-time 2 http://169.254.169.254/ >/dev/null 2>&1",
         ),
         EscapeTechnique(
             id="writable_proc_privileged",
@@ -1951,6 +2027,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.2,
             remediation="--privileged=false, mount /proc read-only",
             cli_flag="--privileged=false",
+            # Combination: writable core_pattern AND CAP_SYS_ADMIN (the
+            # kernel rejects writes to /proc/sys/kernel/* without it,
+            # even when DAC allows). Open-for-append, no actual write.
+            verify_command="exec 3>>/proc/sys/kernel/core_pattern 2>/dev/null && exec 3>&- && grep -q 'CapEff:.*[fF][fF][fF][fF][fF][fF]' /proc/self/status 2>/dev/null",
         ),
         EscapeTechnique(
             id="user_ns_kernel_exploit",
@@ -1982,6 +2062,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.6,
             remediation="Update kernel, disable user namespaces if not needed",
+            # `unshare -U -r` attempts user-namespace creation with the
+            # invoking uid mapped to root inside. Returns 0 if the kernel
+            # permits unprivileged user-ns creation — the prerequisite
+            # for triggering kernel exploits from an unprivileged context.
+            # Non-destructive: spawns and exits true immediately.
+            verify_command="command -v unshare >/dev/null 2>&1 && unshare -U -r true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cap_sys_admin_apparmor_unconfined",
@@ -2014,6 +2100,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             stealth=0.3,
             remediation="Apply AppArmor profile: --security-opt apparmor=docker-default",
             cli_flag="--security-opt apparmor=docker-default",
+            # Combination: CAP_SYS_ADMIN held AND no AppArmor profile
+            # (unconfined or AppArmor not loaded on host).
+            verify_command="grep -q 'CapEff:.*[fF][fF][fF][fF][fF][fF]' /proc/self/status 2>/dev/null && ([ ! -f /proc/self/attr/current ] || grep -q 'unconfined' /proc/self/attr/current 2>/dev/null)",
         ),
         # ── INFO_DISCLOSURE (4) ───────────────────────────────────────
         EscapeTechnique(
@@ -2042,6 +2131,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.95,
             stealth=0.9,
             remediation="Use secrets management (Vault, K8s secrets), not env vars",
+            # Greps /proc/self/environ (NUL-separated env var blob) for
+            # the common secret-pattern var names. Uses tr to convert NULs
+            # to newlines so grep matches per-variable. Confirms an
+            # in-process secret-shaped env var is present right now.
+            verify_command="[ -r /proc/self/environ ] && tr '\\0' '\\n' < /proc/self/environ | grep -qiE '^(.*(PASSWORD|SECRET|TOKEN|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL|AWS_SECRET|AWS_ACCESS|GH[_-]?TOKEN|GITHUB[_-]?TOKEN))='",
         ),
         EscapeTechnique(
             id="cloud_metadata_creds",
@@ -2128,6 +2222,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.6,
             remediation="Don't expose Docker socket, use secrets",
+            # Probes whether the Docker socket is reachable for the kinds
+            # of /containers/json/{id}/json calls that leak other containers'
+            # env vars. Reachable socket = primitive works.
+            verify_command="command -v curl >/dev/null 2>&1 && [ -S /var/run/docker.sock ] && curl -sf --max-time 2 --unix-socket /var/run/docker.sock http://localhost/_ping >/dev/null 2>&1",
         ),
     ]
 

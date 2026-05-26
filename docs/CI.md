@@ -25,7 +25,7 @@ jobs:
         with: { python-version: "3.12" }
 
       - name: Install Cepheus
-        run: pip install cepheus     # or pip install git+https://github.com/Su1ph3r/Cepheus@v0.3.5
+        run: pip install cepheus     # or pip install git+https://github.com/Su1ph3r/Cepheus@v0.4.0
 
       # Build the image you want to scan.
       - name: Build image

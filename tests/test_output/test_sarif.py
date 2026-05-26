@@ -208,6 +208,144 @@ def test_indented_backtick_fence_collapsed(sample_analysis_result):
     assert "~~~" in md
 
 
+def test_generate_verify_sarif_top_level_shape():
+    """Verify-mode SARIF must be a valid SARIF 2.1.0 log with one result
+    per verified technique (not per chain)."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import SARIF_SCHEMA, SARIF_VERSION, generate_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification(
+                "cap_sys_admin_mount",
+                "Mount via CAP_SYS_ADMIN",
+                "critical",
+                VerifyOutcome.CONFIRMED,
+                exit_code=0,
+                stderr=None,
+            ),
+            TechniqueVerification(
+                "cap_net_admin",
+                "Network admin",
+                "medium",
+                VerifyOutcome.NOT_CONFIRMED,
+                exit_code=1,
+                stderr="EPERM",
+            ),
+        ]
+    )
+    sarif = generate_verify_sarif(report, container_id="test-container")
+    assert sarif["version"] == SARIF_VERSION
+    assert sarif["$schema"] == SARIF_SCHEMA
+    assert len(sarif["runs"]) == 1
+    assert len(sarif["runs"][0]["results"]) == 2
+
+
+def test_verify_sarif_outcome_to_level_mapping():
+    """The four VerifyOutcome values map to SARIF levels with security-
+    meaningful semantics: CONFIRMED is the loudest (error)."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import generate_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification("cap_sys_admin_mount", "C", "critical", VerifyOutcome.CONFIRMED, 0, None),
+            TechniqueVerification("cap_net_admin", "N", "medium", VerifyOutcome.NOT_CONFIRMED, 1, "x"),
+            TechniqueVerification("cap_sys_ptrace", "P", "high", VerifyOutcome.NO_VERIFIER, None, None),
+            TechniqueVerification("k8s_service_account", "K", "high", VerifyOutcome.ERROR, -1, "timeout"),
+        ]
+    )
+    sarif = generate_verify_sarif(report, "c1")
+    by_id = {r["ruleId"]: r for r in sarif["runs"][0]["results"]}
+    assert by_id["cap_sys_admin_mount"]["level"] == "error"  # CONFIRMED is loud
+    assert by_id["cap_net_admin"]["level"] == "note"  # NOT_CONFIRMED is informational
+    assert by_id["cap_sys_ptrace"]["level"] == "warning"  # NO_VERIFIER needs manual check
+    assert by_id["k8s_service_account"]["level"] == "warning"  # ERROR needs operator attention
+
+
+def test_verify_sarif_container_id_url_encoded():
+    """container_id must be URL-encoded in the artifact URI (consistent
+    with the analyze-side hostname encoding for I6)."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import generate_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification("cap_sys_admin_mount", "C", "critical", VerifyOutcome.CONFIRMED, 0, None),
+        ]
+    )
+    sarif = generate_verify_sarif(report, container_id="evil\nname/with spaces")
+    uri = sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert "\n" not in uri
+    assert "/with spaces" not in uri
+
+
+def test_verify_sarif_summary_properties_present():
+    """Run-level properties carry the verify counts so consumers can build
+    dashboards without iterating results."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import generate_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification("cap_sys_admin_mount", "C", "critical", VerifyOutcome.CONFIRMED, 0, None),
+            TechniqueVerification("cap_net_admin", "N", "medium", VerifyOutcome.NOT_CONFIRMED, 1, None),
+        ]
+    )
+    sarif = generate_verify_sarif(report, "c1")
+    props = sarif["runs"][0]["properties"]
+    assert props["verify-confirmed"] == 1
+    assert props["verify-not-confirmed"] == 1
+    assert props["verify-total"] == 2
+    assert props["container-id"] == "c1"
+
+
+def test_write_verify_sarif_round_trip(tmp_path):
+    """write_verify_sarif produces parseable JSON on disk."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import SARIF_VERSION, write_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification("cap_sys_admin_mount", "C", "critical", VerifyOutcome.CONFIRMED, 0, None),
+        ]
+    )
+    out = tmp_path / "verify.sarif"
+    path = write_verify_sarif(report, "c1", out)
+    assert path == out
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == SARIF_VERSION
+
+
+def test_verify_sarif_stderr_sanitized_for_code_fence():
+    """A verifier producing stderr with a triple-backtick run must not let
+    the SARIF markdown's code fence be closed early (same defense as
+    PoC commands on the analyze side)."""
+    from cepheus.engine.verifier import TechniqueVerification, VerificationReport, VerifyOutcome
+    from cepheus.output.sarif import generate_verify_sarif
+
+    report = VerificationReport(
+        results=[
+            TechniqueVerification(
+                "cap_sys_admin_mount",
+                "C",
+                "critical",
+                VerifyOutcome.ERROR,
+                exit_code=-1,
+                stderr="line1\n```\n# injected",
+            ),
+        ]
+    )
+    sarif = generate_verify_sarif(report, "c1")
+    md = sarif["runs"][0]["results"][0]["message"]["markdown"]
+    # The opening + closing ``` fences should be the ONLY 3+-backtick
+    # runs at line-start. The stderr's injected ``` is sanitized to ~~~.
+    import re
+
+    fences = list(re.finditer(r"^\s{0,3}`{3,}", md, re.MULTILINE))
+    assert len(fences) == 2, f"Only outer fence pair should remain; found {len(fences)}"
+
+
 def test_rules_and_results_use_same_chain_filter(sample_analysis_result):
     """Regression guard for S7: pre-0.3.5 the rules builder didn't pre-filter
     empty-step chains, while the results builder did. The two collections

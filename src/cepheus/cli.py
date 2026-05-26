@@ -323,6 +323,19 @@ class CIFormat(str, Enum):
     text = "text"
 
 
+class VerifyFormat(str, Enum):
+    """Output formats supported by `cepheus verify`. SARIF is the
+    machine-friendly choice for piping verify outcomes into GitHub
+    Code Scanning alongside the analyze SARIF — each verified technique
+    becomes one SARIF result whose ``level`` reflects the outcome
+    (CONFIRMED → error, NO_VERIFIER → warning, NOT_CONFIRMED → note).
+    """
+
+    terminal = "terminal"
+    json = "json"
+    sarif = "sarif"
+
+
 @app.command(name="ci")
 def ci(
     target: str = typer.Argument(
@@ -753,19 +766,32 @@ def verify(
         ContainerRuntime.docker, "--runtime", "-r", help="Container runtime for `exec` calls"
     ),
     timeout: int = typer.Option(10, "--timeout", help="Per-verifier wall-clock cap in seconds (kills runaway probes)."),
-    format: OutputFormat = typer.Option(
-        OutputFormat.terminal, "--format", "-f", help="Output format: terminal or json"
+    parallel: int = typer.Option(
+        0,
+        "--parallel",
+        "-j",
+        help=(
+            "Number of verifier probes to run concurrently. 0 (default) auto-selects "
+            "min(8, len(matched_techniques)). Pass 1 for fully sequential."
+        ),
+    ),
+    format: VerifyFormat = typer.Option(
+        VerifyFormat.terminal,
+        "--format",
+        "-f",
+        help="Output format: terminal (human), json (machine), or sarif (Code Scanning).",
     ),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write verification report to file"),
 ) -> None:
     """Live verification of matched techniques against a running container.
 
-    For each matched technique that has a ``verify_command`` defined (23
-    of the 65 currently), runs the command inside the container and
-    classifies the outcome as CONFIRMED (kernel/runtime permits the
-    primitive), NOT_CONFIRMED (rejected — static match was a false
-    positive), NO_VERIFIER (no automated check exists), or ERROR
-    (verifier infrastructure failed: timeout, runtime binary missing).
+    For each matched technique that has a ``verify_command`` defined (47
+    of the 65 currently — 72% coverage), runs the command inside the
+    container and classifies the outcome as CONFIRMED (kernel/runtime
+    permits the primitive), NOT_CONFIRMED (rejected — static match was
+    a false positive), NO_VERIFIER (no automated check exists), or
+    ERROR (verifier infrastructure failed: timeout, runtime binary
+    missing). Probes run concurrently by default (see ``--parallel``).
 
     Verify commands are BEST-EFFORT non-destructive — most are read-only
     or use the open-then-close (``exec 3>>X; exec 3>&-``) idiom that
@@ -812,6 +838,8 @@ def verify(
     from cepheus.engine.verifier import VerifyOutcome, verify_analysis
 
     console.print(f"[cyan]Running live verifiers against {rich_escape(container_id)}...[/cyan]")
+    # parallel=0 → auto (None tells verify_analysis to default).
+    workers = None if parallel == 0 else parallel
     report = verify_analysis(
         result,
         container_id=container_id,
@@ -819,10 +847,20 @@ def verify(
         timeout=timeout,
         only_severities=only_severities,
         only_technique_ids=only_technique_ids,
+        parallel=workers,
     )
 
     # 5) Render.
-    if format == OutputFormat.json:
+    if format == VerifyFormat.sarif:
+        from cepheus.output.sarif import generate_verify_sarif, write_verify_sarif
+
+        if output:
+            _validate_output_path(output)
+            write_verify_sarif(report, container_id, output)
+            console.print(f"[green]Verify SARIF written to {output}[/green]")
+        else:
+            console.print_json(json.dumps(generate_verify_sarif(report, container_id)))
+    elif format == VerifyFormat.json:
         payload = {
             "container_id": container_id,
             "summary": {

@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-26
+
+Verifier-depth + parallelism release. Roadmap Phase 1. Coverage of
+`verify_command` probes more than doubles (23 → 47, 35% → 72% of the
+65-technique catalog) and probes now run concurrently inside the target
+container by default. `cepheus verify --format sarif` produces a SARIF
+log that uploads to GitHub Code Scanning alongside (or instead of) the
+static-analysis SARIF — operators get CONFIRMED/NOT_CONFIRMED/NO_VERIFIER/ERROR
+findings as first-class Code Scanning results.
+
+### Added
+
+- **24 new `verify_command` probes** across capability, mount,
+  combinatorial, info-disclosure, and runtime categories:
+  - **capability (3):** `cap_sys_admin_cgroup_escape` (cgroup.procs
+    writability), `cap_sys_admin_bpf` / `ebpf_probe_write_user`
+    (bpftool prog list + BTF readability).
+  - **mount (3):** `cgroupfs_escape`, `systemd_cgroup_injection`,
+    `device_mapper_access`.
+  - **runtime (7):** `k8s_kubelet_api` (probes default-gateway:10250),
+    `k8s_etcd_access` (probes etcd VIP), `docker_api_unauth` (unix +
+    2375), `containerd_shim_escape`, `k8s_node_proxy`, NVIDIA CVEs
+    `cve_2025_23266` and `cve_2024_0132` (device-presence), Docker
+    Desktop `cve_2025_9074`.
+  - **kernel (2):** BuildKit `cve_2024_23651` and `cve_2024_23652`
+    (daemon-socket reachability).
+  - **combinatorial (6):** every combinatorial technique now has a
+    composite probe that checks all sub-primitives via /proc/self/status
+    grep + path tests + secondary file checks.
+  - **info-disclosure (2):** `env_secret_leak` (greps
+    /proc/self/environ for secret-pattern var names), `docker_env_inspection`
+    (Docker socket reachability).
+  - Categories now at 100% coverage: mount (15/15), combinatorial
+    (6/6), info_disclosure (4/4). Capability at 8/9 (`cap_sys_ptrace`
+    intentionally has no probe — the v0.3.5 Q2 fix). Runtime at 12/14.
+  - All probes are POSIX-sh compatible and non-destructive (read-only
+    or open-then-close idiom).
+- **`cepheus verify --parallel N` / `-j N`** — concurrent probe
+  execution via a `ThreadPoolExecutor`. Default `min(8, len(matched))`;
+  `--parallel 1` skips the pool entirely (debuggability); `--parallel 0`
+  resolves to auto. Results are sorted by severity-desc + technique_id
+  so the report is byte-deterministic regardless of execution order.
+  ~5-10× speedup on multi-finding postures.
+- **`cepheus verify --format sarif`** — new `VerifyFormat` enum
+  (`terminal` / `json` / `sarif`). Verify SARIF emits one result per
+  verified technique (not per chain) with `level` reflecting the
+  outcome: CONFIRMED → `error`, NOT_CONFIRMED → `note`, NO_VERIFIER →
+  `warning`, ERROR → `warning`. Run-level `properties` carry counts so
+  consumers can dashboard without iterating results. Stable
+  `partialFingerprints.verifyFingerprint/v1` includes the outcome, so
+  a CONFIRMED → NOT_CONFIRMED transition (e.g. after a cap drop) opens
+  a new Code Scanning finding rather than reusing the old one.
+- **`generate_verify_sarif()` + `write_verify_sarif()`** in
+  `cepheus.output.sarif` — public API for downstream consumers building
+  custom verify-side reports.
+- **Verifier coverage regression guard test** — `tests/test_engine/test_verifier.py::test_verifier_coverage_meets_minimum`
+  fails the build if `verify_command` coverage drops below 40/65,
+  preventing accidental erosion of the differentiator.
+- **Per-category coverage guard** — asserts mount/combinatorial/info_disclosure
+  stay at 100% and capability at all-but-one.
+
+### Changed
+
+- `cepheus verify` help text updated to reflect 47/65 coverage.
+- Verifier classifier extracted to `_classify(rc)` and per-technique
+  execution extracted to `_verify_one()` — pure functions over their
+  inputs, safely dispatchable from a thread pool.
+- `verify_analysis()` now accepts a `parallel: int | None` kwarg.
+
+### Notes
+
+- Probes are dispatched via `docker exec` (or `podman exec`) which
+  serializes on the container's lock for some operations — N=8 is a
+  good default for most images; bump higher if your runtime tolerates
+  it (containerd shim typically does), lower if you see probe-flake
+  from contention.
+- `cap_sys_ptrace` and the 15 unverifiable kernel CVEs remain
+  intentionally NO_VERIFIER — the test for those is the exploit
+  itself, which is not what `verify` is for.
+
 ## [0.3.5] - 2026-05-26
 
 Shift-left + verification release. Turns Cepheus from a one-shot CLI
@@ -648,7 +728,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...v0.3.5
 [0.3.3]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.1...v0.3.2
