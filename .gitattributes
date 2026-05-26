@@ -1,0 +1,27 @@
+# Enforce LF line endings on all text files — required for the enumerator
+# (POSIX shell script) to be parseable by dash/busybox sh inside containers.
+# Without this, Windows clones get CRLF endings and `sh enumerator/cepheus-enum.sh`
+# fails on every line.
+* text=auto eol=lf
+
+# Shell scripts MUST be LF on disk regardless of host
+*.sh         text eol=lf
+
+# Python source — LF for cross-platform consistency
+*.py         text eol=lf
+
+# Markdown, YAML, JSON, TOML — text with LF
+*.md         text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.json       text eol=lf
+*.toml       text eol=lf
+*.cfg        text eol=lf
+*.ini        text eol=lf
+
+# Binary files — never convert
+*.png        binary
+*.jpg        binary
+*.gz         binary
+*.tar        binary
+*.zip        binary

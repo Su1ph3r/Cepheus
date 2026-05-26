@@ -6,12 +6,23 @@ from datetime import datetime, timezone
 
 from cepheus.config import CepheusConfig
 from cepheus.engine.chainer import build_combinatorial_chains, build_single_chains
-from cepheus.engine.matcher import match_technique
+from cepheus.engine.matcher import detect_distro_kernel, match_technique
 from cepheus.engine.scorer import rank_chains
 from cepheus.models.chain import EscapeChain
 from cepheus.models.posture import ContainerPosture
 from cepheus.models.result import AnalysisResult, RemediationItem
 from cepheus.models.technique import EscapeTechnique, Severity
+
+
+def _backfill_distro_kernel(posture: ContainerPosture) -> None:
+    """If the enumerator didn't populate posture.kernel.is_distro_kernel, run
+    pattern detection on the version string here. Idempotent."""
+    if posture.kernel.is_distro_kernel:
+        return
+    is_distro, tag = detect_distro_kernel(posture.kernel.version)
+    if is_distro:
+        posture.kernel.is_distro_kernel = True
+        posture.kernel.distro_kernel_tag = tag
 
 
 def _render_poc(technique_id: str, posture: ContainerPosture) -> str:
@@ -82,6 +93,9 @@ def analyze(
     if config is None:
         config = CepheusConfig()
 
+    # Backfill distro-kernel detection if the enumerator didn't set it
+    _backfill_distro_kernel(posture)
+
     # Load techniques
     from cepheus.engine.technique_db import get_all_techniques
 
@@ -92,7 +106,7 @@ def analyze(
     matched_for_remediation: list[tuple[EscapeTechnique, float]] = []
 
     for technique in all_techniques:
-        is_match, confidence = match_technique(posture, technique, config.min_confidence)
+        is_match, confidence = match_technique(posture, technique, config.min_confidence, config)
         if is_match:
             poc = _render_poc(technique.id, posture)
             matched.append((technique, confidence, poc))

@@ -10,6 +10,22 @@ class KernelInfo(BaseModel):
     major: int = 0
     minor: int = 0
     patch: int = 0
+    is_distro_kernel: bool = Field(
+        default=False,
+        description=(
+            "True when the kernel version string matches a known distro/vendor "
+            "build with security backports (WSL2, EKS, AKS, GKE, RHEL, etc.). "
+            "Set by the enumerator; consumed by the matcher to downgrade "
+            "confidence on kernel-range-only CVE matches."
+        ),
+    )
+    distro_kernel_tag: str | None = Field(
+        default=None,
+        description=(
+            "If is_distro_kernel is True, the specific tag matched "
+            "(e.g. 'microsoft-standard-WSL2', 'aws', 'azure', 'gke', 'el8')."
+        ),
+    )
 
 
 class CapabilityInfo(BaseModel):
@@ -48,6 +64,25 @@ class NetworkInfo(BaseModel):
     can_reach_containerd_sock: bool = False
     can_reach_crio_sock: bool = False
     listening_ports: list[int] = Field(default_factory=list)
+    # Component reachability — populated by the enumerator (best-effort TCP probe).
+    # Used by techniques that should only fire when the vulnerable component is
+    # actually network-reachable from this pod, not merely "the host runs k8s".
+    can_reach_etcd: bool | None = Field(
+        default=None,
+        description="TCP connect to typical etcd ports (2379) succeeds from this pod",
+    )
+    can_reach_kubelet_api: bool | None = Field(
+        default=None,
+        description="TCP connect to kubelet API (10250) on node IP succeeds",
+    )
+    component_reachability: dict[str, bool] = Field(
+        default_factory=dict,
+        description=(
+            "Optional named-component → reachable map. Enumerator probes "
+            "well-known cluster components (e.g. 'ingress-nginx-controller' "
+            "on its service VIP). Missing key means 'not probed'."
+        ),
+    )
 
 
 class CredentialInfo(BaseModel):
@@ -82,6 +117,27 @@ class KubernetesInfo(BaseModel):
     namespace: str | None = None
     pod_name: str | None = None
     node_name: str | None = None
+    # Cluster-component inventory — populated by the enumerator when the pod's
+    # SA token has list-pods or list-services permission. Empty list means the
+    # enumerator couldn't determine; the matcher should treat this as "unknown"
+    # (confidence_if_absent=0.3) not "absent" (0.0). See P1 in design doc.
+    cluster_components: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of detected cluster components (e.g. 'ingress-nginx', "
+            "'argocd', 'buildkit', 'harbor'). Populated by enumerator using SA "
+            "token to query the K8s API for known component labels/images."
+        ),
+    )
+    cluster_components_probed: bool = Field(
+        default=False,
+        description=(
+            "True if the enumerator successfully queried the K8s API for "
+            "components. False means the cluster_components list is "
+            "indeterminate (couldn't list); techniques should treat absent "
+            "components as 'unknown' rather than 'definitely not present'."
+        ),
+    )
 
 
 class ContainerPosture(BaseModel):

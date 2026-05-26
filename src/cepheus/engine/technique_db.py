@@ -169,10 +169,13 @@ def _build_techniques() -> list[EscapeTechnique]:
             id="cap_dac_override",
             name="Write arbitrary host files",
             category=TechniqueCategory.CAPABILITY,
-            severity=Severity.CRITICAL,
+            severity=Severity.HIGH,
             description=(
                 "CAP_DAC_OVERRIDE bypasses file write permission checks, "
-                "enabling writes to any host file accessible from the mount namespace."
+                "enabling writes to any host file accessible from the mount namespace. "
+                "Note: CAP_DAC_OVERRIDE is part of the Docker default capability set; "
+                "it is only an escape primitive when the container can already see "
+                "host files (privileged, hostPath mount, or shared mount namespace)."
             ),
             prerequisites=[
                 Prerequisite(
@@ -180,15 +183,28 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="CAP_DAC_OVERRIDE",
                     description="Requires CAP_DAC_OVERRIDE capability",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="runtime.privileged",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "Container must be privileged OR have a host mount; "
+                        "CAP_DAC_OVERRIDE alone in a non-privileged container "
+                        "only bypasses DAC within the container's own mount namespace."
+                    ),
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1565"],
             references=[
                 "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+                "https://docs.docker.com/engine/security/#linux-kernel-capabilities",
             ],
             reliability=0.95,
             stealth=0.4,
-            remediation="--cap-drop=DAC_OVERRIDE",
+            remediation="--cap-drop=DAC_OVERRIDE and avoid privileged/hostPath mounts",
         ),
         EscapeTechnique(
             id="cap_net_admin",
@@ -318,9 +334,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             category=TechniqueCategory.MOUNT,
             severity=Severity.CRITICAL,
             description=(
-                "If /proc/sys/kernel/core_pattern is writable, an attacker can "
-                "set it to a pipe command that executes on the host when a core "
-                "dump is triggered."
+                "If /proc/sys/kernel/core_pattern is writable AND the container "
+                "has CAP_SYS_ADMIN, an attacker can set it to a pipe command "
+                "that executes on the host when a core dump is triggered. "
+                "Note: DAC permission alone is insufficient — kernel rejects "
+                "writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even when "
+                "the procfs mount appears writable to the container."
             ),
             prerequisites=[
                 Prerequisite(
@@ -328,6 +347,17 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/proc/sys/kernel/core_pattern",
                     description="/proc/sys/kernel/core_pattern must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required for the kernel to honor writes "
+                        "to /proc/sys/kernel/* — DAC-only access yields EROFS"
+                    ),
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -345,7 +375,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.HIGH,
             description=(
                 "Writing to /proc/sysrq-trigger can crash or reboot the host "
-                "kernel, causing denial of service."
+                "kernel, causing denial of service. Requires both write access "
+                "to the procfs path AND CAP_SYS_ADMIN — non-privileged "
+                "containers see the file as writable per DAC but the kernel "
+                "rejects the write with EROFS."
             ),
             prerequisites=[
                 Prerequisite(
@@ -353,6 +386,17 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/proc/sysrq-trigger",
                     description="/proc/sysrq-trigger must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required for the kernel to honor sysrq writes — "
+                        "DAC-only access yields EROFS in unprivileged containers"
+                    ),
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1529"],
@@ -370,7 +414,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.HIGH,
             description=(
                 "Writable /sys filesystem allows manipulation of kernel "
-                "parameters including hugepages, device settings, and more."
+                "parameters including hugepages, device settings, and more. "
+                "Note: /sys is mounted read-only in non-privileged containers; "
+                "DAC may show write permission but the mount is ro at the "
+                "kernel level. Real write access requires CAP_SYS_ADMIN."
             ),
             prerequisites=[
                 Prerequisite(
@@ -378,6 +425,18 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/sys",
                     description="/sys must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required for the kernel to honor writes "
+                        "to /sys — DAC-only access yields EROFS in unprivileged "
+                        "containers."
+                    ),
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -590,7 +649,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.MEDIUM,
             description=(
                 "Writable /dev/shm shared between containers on the same host "
-                "allows cross-container data exchange and exfiltration."
+                "allows cross-container data exchange and exfiltration. "
+                "Note: every container has a writable /dev/shm by default — "
+                "this technique only represents an actual exposure when the IPC "
+                "namespace is shared with the host (hostIPC) or with another pod "
+                "via an explicit shared emptyDir volume."
             ),
             prerequisites=[
                 Prerequisite(
@@ -598,6 +661,19 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/dev/shm",
                     description="/dev/shm must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="runtime.privileged",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "Privileged container (proxy for hostIPC/shared-IPC "
+                        "exposure — direct hostIPC detection is unreliable in "
+                        "the 0.4.0 enumerator). Non-privileged pods get a "
+                        "private /dev/shm via emptyDir tmpfs."
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1005", "T1080"],
@@ -615,7 +691,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.HIGH,
             description=(
                 "Symlinks in /proc/self/fd can point to host filesystem "
-                "locations, enabling file reads/writes outside the container."
+                "locations, enabling file reads/writes outside the container. "
+                "Every container has /proc/self/fd; the exploit primitive only "
+                "yields host access when combined with a capability that "
+                "permits reading the symlink target (CAP_DAC_READ_SEARCH or "
+                "CAP_SYS_ADMIN), or with CVE-2024-21626-style runc fd leaks."
             ),
             prerequisites=[
                 Prerequisite(
@@ -623,6 +703,21 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/proc/self/fd",
                     description="/proc/self/fd must be accessible and writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="any_of",
+                    check_value=["CAP_DAC_READ_SEARCH", "CAP_SYS_ADMIN"],
+                    description=(
+                        "Need a capability that bypasses path-resolution DAC "
+                        "checks on the symlink target. CAP_DAC_OVERRIDE is in "
+                        "the default Docker cap set but doesn't actually permit "
+                        "reading symlinks pointing outside the container's "
+                        "mount namespace — only CAP_DAC_READ_SEARCH and "
+                        "CAP_SYS_ADMIN do."
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -672,7 +767,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             description=(
                 "Writable /proc/sys/vm allows manipulation of kernel memory "
                 "management parameters, potentially causing host instability "
-                "or enabling side-channel attacks."
+                "or enabling side-channel attacks. Like other /proc/sys/* "
+                "interfaces, real write access requires CAP_SYS_ADMIN even "
+                "when DAC permissions appear to allow it."
             ),
             prerequisites=[
                 Prerequisite(
@@ -680,6 +777,16 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="contains",
                     check_value="/proc/sys/vm",
                     description="/proc/sys/vm must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required to write kernel sysctls"
+                    ),
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1529"],
@@ -1121,7 +1228,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.CRITICAL,
             description=(
                 "TOCTOU race condition in BuildKit when mounting cache volumes at build time "
-                "allows escalation from disk access to full host root command execution."
+                "allows escalation from disk access to full host root command execution. "
+                "Note: BuildKit is a build-time tool — this only applies to pods that can "
+                "invoke `docker build` or `buildctl` against a vulnerable BuildKit daemon. "
+                "Runtime-only workloads are not affected."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1129,7 +1239,19 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="regex",
                     check_value="docker|containerd",
                     description="Requires Docker or containerd runtime",
-                    confidence_if_absent=0.3,
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_docker_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "BuildKit exploitation requires reachability to the "
+                        "build daemon socket (Docker / BuildKit). Pods without "
+                        "socket access cannot invoke `docker build` and so "
+                        "cannot trigger this CVE."
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1611", "T1068"],
@@ -1146,7 +1268,8 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.CRITICAL,
             description=(
                 "Path traversal vulnerability in BuildKit allows deletion of arbitrary files "
-                "on the host during the image building process."
+                "on the host during the image building process. Same scope as CVE-2024-23651: "
+                "build-time only, requires access to a BuildKit daemon."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1154,7 +1277,17 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="regex",
                     check_value="docker|containerd",
                     description="Requires Docker or containerd runtime",
-                    confidence_if_absent=0.3,
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_docker_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "BuildKit exploitation requires reachability to the "
+                        "build daemon socket. See CVE-2024-23651 for scope notes."
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1611", "T1565"],
@@ -1234,7 +1367,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.CRITICAL,
             description=(
                 "Direct access to etcd (port 2379) exposes all Kubernetes "
-                "secrets, configurations, and cluster state."
+                "secrets, configurations, and cluster state. In a properly "
+                "configured cluster etcd is on the control plane only and "
+                "isolated from workload pods — this technique requires the "
+                "enumerator to confirm TCP reachability to 2379 from inside "
+                "the pod, not merely that the workload runs in Kubernetes."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1242,6 +1379,19 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value="kubernetes",
                     description="Must be running under Kubernetes",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_etcd",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "etcd:2379 must be TCP-reachable from this pod. "
+                        "When the enumerator hasn't probed (field is None), "
+                        "we degrade to confidence_if_absent rather than 0 so "
+                        "the technique stays visible at low priority."
+                    ),
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1005"],
@@ -1284,7 +1434,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.HIGH,
             description=(
                 "Exploit vulnerabilities in containerd-shim to gain host "
-                "access via the container runtime interface."
+                "access via the container runtime interface. Most public "
+                "containerd-shim CVEs (e.g. CVE-2020-15257) require both an "
+                "unpatched containerd AND reachability to the shim's abstract "
+                "Unix socket — flag as low-priority opportunistic match unless "
+                "the containerd version is independently verified vulnerable."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1292,6 +1446,17 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value="containerd",
                     description="Runtime must be containerd",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_containerd_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "Need reachability to containerd's UNIX socket or the "
+                        "shim's abstract socket to trigger known exploits"
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1309,7 +1474,10 @@ def _build_techniques() -> list[EscapeTechnique]:
             severity=Severity.CRITICAL,
             description=(
                 "Overwrite the host runc binary via /proc/self/exe to gain "
-                "code execution on the host when runc is next invoked."
+                "code execution on the host when runc is next invoked. "
+                "Patched in runc >= 1.0.0-rc7 (Feb 2019) — current Docker / "
+                "containerd builds ship patched runc. Only flag when runc "
+                "version is independently verified vulnerable."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1317,6 +1485,22 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="regex",
                     check_value="^(docker|containerd)$",
                     description="Runtime uses runc (Docker or containerd)",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="runtime.runc_version",
+                    check_type="version_lte",
+                    check_value="1.0.0-rc6",
+                    description=(
+                        "runc version must be known AND <= 1.0.0-rc6. When "
+                        "the enumerator can't detect runc version (field is "
+                        "None), we drop the match entirely rather than fire "
+                        "speculatively — modern container runtimes (Docker "
+                        ">= 18.09.2, kind, EKS, GKE, AKS) ship patched runc. "
+                        "Improving runc version detection in the enumerator "
+                        "is tracked separately."
+                    ),
+                    confidence_if_absent=0.0,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1384,11 +1568,17 @@ def _build_techniques() -> list[EscapeTechnique]:
             id="lsm_selinux_unconfined",
             name="SELinux disabled/unconfined",
             category=TechniqueCategory.RUNTIME,
-            severity=Severity.HIGH,
+            severity=Severity.LOW,
             description=(
-                "SELinux is disabled or set to unconfined, removing "
-                "mandatory access control that would restrict container "
-                "access to host resources."
+                "SELinux is disabled or set to unconfined, removing the "
+                "mandatory-access-control layer that would otherwise restrict "
+                "container access to host resources. This is host-posture "
+                "context, not a per-pod escape — it amplifies other primitives "
+                "(privileged, capability adds, hostPath mounts) by removing "
+                "the LSM safety net. On hosts with no SELinux at all (WSL2, "
+                "Docker Desktop, most non-RHEL distros) this fires on every "
+                "scan and is informational; pair with another finding for "
+                "actionable risk."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1396,6 +1586,18 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value=None,
                     description="SELinux must be disabled or unconfined",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="runtime.privileged",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "Only meaningful when combined with another escape "
+                        "primitive — pure absence of SELinux on a hardened "
+                        "non-privileged pod doesn't yield host access"
+                    ),
+                    confidence_if_absent=0.1,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1510,7 +1712,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             description=(
                 "Unauthenticated RCE in ingress-nginx admission webhook. Any pod on the "
                 "cluster network can exploit configuration injection to gain access to all "
-                "secrets across all namespaces and achieve full cluster takeover."
+                "secrets across all namespaces and achieve full cluster takeover. "
+                "Requires ingress-nginx to actually be deployed in the cluster — many "
+                "clusters use Traefik, HAProxy, Cilium, or no ingress controller at all."
             ),
             prerequisites=[
                 Prerequisite(
@@ -1518,6 +1722,19 @@ def _build_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value="kubernetes",
                     description="Must be running in Kubernetes",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="kubernetes.cluster_components",
+                    check_type="contains",
+                    check_value="ingress-nginx",
+                    description=(
+                        "ingress-nginx controller must be deployed in the cluster. "
+                        "When the enumerator can't query the API (no SA token, no "
+                        "list-pods permission), confidence_if_absent keeps the "
+                        "technique visible at low priority rather than dropping it."
+                    ),
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1611", "T1190"],

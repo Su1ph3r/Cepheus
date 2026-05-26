@@ -184,7 +184,10 @@ collect_mounts() {
             _old_ifs="$IFS"
             IFS=','
             for _o in $_raw_opts; do
-                _opts_json=$(list_append "$_opts_json" "\"$_o\"")
+                # Use json_str to escape backslashes / quotes / control chars —
+                # WSL DrvFS exposes options like `path=C:\;...` which break the
+                # JSON output if embedded verbatim.
+                _opts_json=$(list_append "$_opts_json" "$(json_str "$_o")")
             done
             IFS="$_old_ifs"
             _entry=$(printf '{"source": %s, "destination": %s, "fstype": %s, "options": [%s]}' \
@@ -414,7 +417,7 @@ collect_runtime() {
         PID_ONE=$(cat /proc/1/cmdline 2>/dev/null | tr '\000' ' ' | awk '{print $1}' || echo "unknown")
     fi
 
-    # Runtime detection
+    # Runtime detection — try several signals, ordered most-specific first.
     if [ -f /.dockerenv ]; then
         RUNTIME="docker"
     elif [ -d /run/containerd ]; then
@@ -426,6 +429,18 @@ collect_runtime() {
             *docker*)   RUNTIME="docker" ;;
             *containerd*) RUNTIME="containerd" ;;
             *cri-o*)    RUNTIME="cri-o" ;;
+        esac
+    fi
+    # Fallback — inspect mountinfo for runtime-specific overlay paths. Useful
+    # on kind/EKS/GKE/k3s where /run/containerd isn't mounted into the pod and
+    # /.dockerenv isn't present, but the overlay snapshot path identifies the
+    # runtime unambiguously.
+    if [ "$RUNTIME" = "unknown" ] && [ -r /proc/self/mountinfo ]; then
+        _mi=$(cat /proc/self/mountinfo 2>/dev/null)
+        case "$_mi" in
+            *io.containerd.snapshotter*) RUNTIME="containerd" ;;
+            *docker/overlay2*)            RUNTIME="docker" ;;
+            *cri-o*)                      RUNTIME="cri-o" ;;
         esac
     fi
 

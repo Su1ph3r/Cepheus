@@ -11,13 +11,37 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from cepheus import __version__
 from cepheus.config import CepheusConfig
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"cepheus {__version__}")
+        raise typer.Exit()
+
 
 app = typer.Typer(
     name="cepheus",
     help="Container Escape Scenario Modeler — enumerate security posture and model escape paths.",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Print version and exit.",
+    ),
+) -> None:
+    pass
+
+
 console = Console()
 
 _CONTAINER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$")

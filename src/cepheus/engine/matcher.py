@@ -5,8 +5,59 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from cepheus.config import CepheusConfig
 from cepheus.models.posture import ContainerPosture
 from cepheus.models.technique import EscapeTechnique, Prerequisite
+
+# Check types that key off the host kernel version alone. When a technique's
+# prerequisites are exclusively these, the match is opportunistic: we know the
+# host kernel is *in the published vulnerable range*, but we have not verified
+# the specific vulnerable component is present/reachable or that the kernel
+# binary isn't patched (distro backports). See P2/P3 in cepheus-precision-design.md.
+_KERNEL_ONLY_CHECK_TYPES = {"kernel_gte", "kernel_lte", "kernel_between", "version_lte"}
+
+# Substrings/regexes that identify a distro/vendor kernel that actively backports
+# upstream security patches. When detected, kernel-range-only CVE matches are
+# downgraded further (config.distro_kernel_max_confidence). The match list
+# below is conservative — false negatives (treating a backported kernel as
+# generic) keep the old behaviour; false positives (treating a non-backported
+# kernel as backported) reduce CVE recall, which is a worse failure mode.
+_DISTRO_KERNEL_PATTERNS: list[tuple[str, str]] = [
+    # (pattern, tag) — pattern is matched case-insensitively against kernel.version
+    ("microsoft-standard-WSL2", "wsl2"),
+    ("microsoft-standard", "wsl"),
+    ("-aws",   "aws"),
+    ("-azure", "azure"),
+    ("-gke",   "gke"),
+    ("-gcp",   "gcp"),
+    ("-oracle", "oracle"),
+    ("-ibm",   "ibm"),
+    (".amzn1.", "amazon-linux-1"),
+    (".amzn2.", "amazon-linux-2"),
+    (".amzn2023.", "amazon-linux-2023"),
+    (".el7", "rhel7"),
+    (".el8", "rhel8"),
+    (".el9", "rhel9"),
+    (".centos.", "centos"),
+    ("linuxkit", "docker-desktop"),
+    ("orbstack", "orbstack"),
+    ("-bottlerocket", "bottlerocket"),
+    ("-flatcar", "flatcar"),
+]
+
+
+def detect_distro_kernel(version: str) -> tuple[bool, str | None]:
+    """Return (is_distro, tag) for a kernel version string.
+
+    Patterns are matched case-insensitively. First match wins.
+    """
+    if not version:
+        return False, None
+    lower = version.lower()
+    for pattern, tag in _DISTRO_KERNEL_PATTERNS:
+        if pattern.lower() in lower:
+            return True, tag
+    return False, None
 
 
 class _MissingSentinel:
@@ -157,12 +208,26 @@ def match_technique(
     posture: ContainerPosture,
     technique: EscapeTechnique,
     min_confidence: float = 0.3,
+    config: CepheusConfig | None = None,
 ) -> tuple[bool, float]:
     """Evaluate all prerequisites of a technique against a posture.
 
     Returns (matched, confidence) where:
     - matched: True if average confidence >= min_confidence AND no prerequisite returned 0.0
     - confidence: Average confidence across all prerequisites
+
+    Precision controls (config-driven, applied AFTER averaging):
+    - If all prerequisites are kernel-version checks (kernel_gte / kernel_lte /
+      kernel_between / version_lte) — i.e. the match is "kernel is in vulnerable
+      range" with no other gating — cap the resulting confidence at
+      `config.kernel_only_max_confidence` (default 0.5). This keeps the
+      technique visible but ranked below techniques that confirm a specific
+      vulnerable component is present.
+    - If additionally `posture.kernel.is_distro_kernel` is True (the enumerator
+      recognised a backport-maintained distro/vendor kernel — WSL2, EKS, AKS,
+      GKE, RHEL, etc.) cap even further at `config.distro_kernel_max_confidence`
+      (default 0.2 — below the default min_confidence, so the technique drops
+      out of the report entirely).
     """
     if not technique.prerequisites:
         # No prerequisites means always applicable (info-only technique)
@@ -176,4 +241,17 @@ def match_technique(
         confidences.append(conf)
 
     avg_confidence = sum(confidences) / len(confidences)
+
+    # Kernel-only confidence cap
+    only_kernel_prereqs = all(
+        p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites
+    )
+    if only_kernel_prereqs:
+        if config is None:
+            config = CepheusConfig()
+        cap = config.kernel_only_max_confidence
+        if getattr(posture.kernel, "is_distro_kernel", False):
+            cap = min(cap, config.distro_kernel_max_confidence)
+        avg_confidence = min(avg_confidence, cap)
+
     return avg_confidence >= min_confidence, avg_confidence
