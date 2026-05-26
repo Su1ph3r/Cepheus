@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cepheus"
-version = "0.4.0"
+version = "0.3.1"
 description = "Container Escape Scenario Modeler — enumerate container security posture and model escape paths"
 readme = "README.md"
 license = "MIT"

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 from cepheus.models.chain import EscapeChain
@@ -27,5 +25,4 @@ class AnalysisResult(BaseModel):
     remediations: list[RemediationItem] = Field(default_factory=list)
     llm_analysis: str | None = None
     executive_summary: str | None = None
-    cloud_context: dict[str, Any] | None = None
     analysis_timestamp: str = ""
