@@ -4,13 +4,17 @@ GitHub Action wrapping [Cepheus](https://github.com/Su1ph3r/Cepheus) — a
 container escape scanner. Fails the build on severity or baseline-regression
 gates and uploads SARIF to GitHub Code Scanning.
 
-> **Note**: This directory is the source of truth for the action. On
-> every Cepheus release a sync workflow mirrors these files to the
+> **Note — source of truth**: the canonical home for this action is
+> [`Su1ph3r/Cepheus`](https://github.com/Su1ph3r/Cepheus) under
+> [`cepheus-action/`](https://github.com/Su1ph3r/Cepheus/tree/main/cepheus-action).
+> A release-triggered sync workflow mirrors that directory to the
 > standalone [`Su1ph3r/cepheus-action`](https://github.com/Su1ph3r/cepheus-action)
-> repo and tags the same version, so consumers can reference it as
-> `Su1ph3r/cepheus-action@vX.Y.Z`. The action is thin — it just
-> installs Cepheus from PyPI and runs `cepheus ci` — so it rarely
-> needs to change independently of the engine.
+> repo and re-tags the same version on every Cepheus release, so
+> consumers can pin via `Su1ph3r/cepheus-action@vX.Y.Z`. The action
+> is thin — it just installs Cepheus from PyPI and calls `cepheus ci`
+> — so it rarely needs to change independently of the engine. PRs
+> against `Su1ph3r/cepheus-action` directly should be retargeted at
+> the monorepo; the standalone repo is overwritten on the next sync.
 >
 > Default `cepheus-version` is set to the release this action ships
 > alongside so installs are reproducible without operators having to
