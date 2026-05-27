@@ -34,18 +34,18 @@ class Cepheus < Formula
   on_macos do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-darwin-arm64"
-      sha256 "REPLACE_WITH_DARWIN_ARM64_SHA256"
+      sha256 "ea21fae62050de074df311c3a43ee3f07f328b378325319e5b0e8d08ce029b36"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-linux-arm64"
-      sha256 "REPLACE_WITH_LINUX_ARM64_SHA256"
+      sha256 "0ade524b158015ec3eec561de1900fb9c626dcc34dc1947f4daa2b9aa3ecdff1"
     end
     on_intel do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-linux-amd64"
-      sha256 "REPLACE_WITH_LINUX_AMD64_SHA256"
+      sha256 "a3ed1242409a0944cf2520d35ef88ab594bcca097d8169f8f0f51224b91139ee"
     end
   end
 
