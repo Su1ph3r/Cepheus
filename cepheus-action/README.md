@@ -41,7 +41,7 @@ jobs:
         run: docker build -t my-app:${{ github.sha }} .
 
       - name: Cepheus scan
-        uses: Su1ph3r/cepheus-action@v0.6.2
+        uses: Su1ph3r/cepheus-action@v0.6.3
         with:
           image: my-app:${{ github.sha }}
           max-severity: critical
@@ -63,7 +63,7 @@ at the `max-severity` threshold or higher.
 | `fail-on-new` | no | `false` | Fail if any chain in current isn't in `baseline`. Requires `baseline`. |
 | `output` | no | `cepheus.sarif` | SARIF output file. |
 | `upload-sarif` | no | `true` | Auto-upload to Code Scanning. Requires `security-events: write`. |
-| `cepheus-version` | no | `0.6.2` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. The action installs the `cepheus-engine` distribution; the installed CLI is `cepheus`. |
+| `cepheus-version` | no | `0.6.3` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. The action installs the `cepheus-engine` distribution; the installed CLI is `cepheus`. |
 | `runtime` | no | `docker` | `docker` or `podman`. |
 | `python-version` | no | `3.12` | Python version for Cepheus install. |
 
@@ -104,7 +104,7 @@ treat a corrupt scan as "all clear":
 ### Severity-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.6.2
+- uses: Su1ph3r/cepheus-action@v0.6.3
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -115,7 +115,7 @@ Simple. Block any container that ships a critical chain.
 ### Regression-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.6.2
+- uses: Su1ph3r/cepheus-action@v0.6.3
   with:
     image: my-app:${{ github.sha }}
     baseline: .github/cepheus-baseline.sarif
@@ -128,7 +128,7 @@ chains, lets existing ones through.
 ### Both
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.6.2
+- uses: Su1ph3r/cepheus-action@v0.6.3
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -150,7 +150,7 @@ posture outside CI and reference it in the workflow:
 #   gh api repos/ORG/REPO/contents/.github/prod-posture.json ...
 
 # Step 2 (in CI):
-- uses: Su1ph3r/cepheus-action@v0.6.2
+- uses: Su1ph3r/cepheus-action@v0.6.3
   with:
     posture-file: .github/prod-posture.json
     max-severity: high

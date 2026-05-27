@@ -23,11 +23,11 @@ differently.
 ```sh
 pip install cepheus-engine
 # Or pin a specific version:
-pip install cepheus-engine==0.6.2
+pip install cepheus-engine==0.6.3
 # Or install from a git ref:
-pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.2
+pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.3
 # Or grab the wheel from the release page:
-pip install https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/cepheus_engine-0.6.2-py3-none-any.whl
+pip install https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/cepheus_engine-0.6.3-py3-none-any.whl
 ```
 
 The PyPI distribution name is `cepheus-engine` (the bare `cepheus`
@@ -55,21 +55,21 @@ runtime required. Built with Nuitka, sha256-verified.
 ```sh
 # Linux amd64
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/cepheus-linux-amd64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/cepheus-linux-amd64
 chmod +x cepheus
 ./cepheus --version
 
 # Linux arm64
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/cepheus-linux-arm64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/cepheus-linux-arm64
 
 # macOS Apple Silicon (Intel Macs: use Rosetta — `arch -x86_64 ./cepheus ...`)
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/cepheus-darwin-arm64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/cepheus-darwin-arm64
 
 # Windows amd64 (PowerShell)
 Invoke-WebRequest `
-  -Uri https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/cepheus-windows-amd64.exe `
+  -Uri https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/cepheus-windows-amd64.exe `
   -OutFile cepheus.exe
 ```
 
@@ -77,7 +77,7 @@ Verify with the published SHA-256 checksums:
 
 ```sh
 curl -L -o SHA256SUMS \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.2/SHA256SUMS
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.3/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
@@ -93,7 +93,7 @@ release. Tagged `:X.Y.Z`, `:X.Y`, and `:latest`.
 ```sh
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/su1ph3r/cepheus:0.6.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.3 \
   ci nginx:latest --max-severity critical --format sarif --output /dev/stdout
 ```
 
@@ -106,7 +106,7 @@ Without it, `cepheus ci` falls back to posture-file mode only.
 ```sh
 docker run --rm \
   -v "$PWD:/work" -w /work \
-  ghcr.io/su1ph3r/cepheus:0.6.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.3 \
   ci posture.json --max-severity critical --format sarif -o report.sarif
 ```
 
@@ -115,7 +115,7 @@ docker run --rm \
 ```sh
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/su1ph3r/cepheus:0.6.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.3 \
   verify --container-id my-running-container --format sarif --output /dev/stdout
 ```
 
@@ -123,7 +123,7 @@ docker run --rm \
 
 | Tag | Use case |
 |---|---|
-| `ghcr.io/su1ph3r/cepheus:0.6.2` | Pin to an exact version (recommended for CI) |
+| `ghcr.io/su1ph3r/cepheus:0.6.3` | Pin to an exact version (recommended for CI) |
 | `ghcr.io/su1ph3r/cepheus:0.6` | Track the latest patch in a minor line |
 | `ghcr.io/su1ph3r/cepheus:latest` | Track the latest stable release (avoid in CI) |
 

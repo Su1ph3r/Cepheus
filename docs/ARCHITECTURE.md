@@ -45,9 +45,9 @@ Cepheus is a two-component container escape modeling tool:
 ```
 Cepheus/
 ├── pyproject.toml                    # Build config, dependencies
-├── enumerator/
-│   └── cepheus-enum.sh               # POSIX shell enumerator (zero deps)
 ├── src/cepheus/
+│   ├── enumerator/
+│   │   └── cepheus-enum.sh           # POSIX shell enumerator (zero deps; bundled in wheel)
 │   ├── cli.py                        # Typer CLI (analyze, enumerate, techniques, diff)
 │   ├── config.py                     # CepheusConfig (env vars via pydantic-settings)
 │   ├── models/

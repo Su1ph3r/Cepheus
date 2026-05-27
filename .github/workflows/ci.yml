@@ -111,4 +111,4 @@ jobs:
         # NOTE: shellcheck is intentionally NOT added here yet — adding it
         # in R2 alongside the planned enumerator expansion so we audit
         # findings in one pass instead of trickling them in.
-        run: dash -n enumerator/cepheus-enum.sh
+        run: dash -n src/cepheus/enumerator/cepheus-enum.sh

@@ -34,7 +34,7 @@ kind create cluster --name k8sgoat --image kindest/node:v1.31.0
 cd kubernetes-goat && bash setup-kubernetes-goat.sh
 
 # For each pod, copy the enumerator in and dump posture
-ENUM=/path/to/Cepheus/enumerator/cepheus-enum.sh
+ENUM=/path/to/Cepheus/src/cepheus/enumerator/cepheus-enum.sh
 for pod in $(kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}'); do
   ns=${pod%%/*}; name=${pod##*/}
   kubectl -n "$ns" cp "$ENUM" "$name:/tmp/e.sh"

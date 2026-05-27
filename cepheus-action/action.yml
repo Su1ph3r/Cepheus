@@ -66,7 +66,7 @@ inputs:
     default: "true"
   cepheus-version:
     description: >-
-      Cepheus version to install from PyPI (e.g. `0.6.2`). Defaults to
+      Cepheus version to install from PyPI (e.g. `0.6.3`). Defaults to
       the version this action ships alongside — change in lockstep with
       the action tag so consumers get a reproducible install. Note: the
       PyPI distribution is published as ``cepheus-engine`` (the bare
@@ -74,7 +74,7 @@ inputs:
       project); the Python module import, CLI binary, GHCR image, and
       Homebrew/Scoop names all remain ``cepheus``.
     required: false
-    default: "0.6.2"
+    default: "0.6.3"
   runtime:
     description: Container runtime for image-based enumeration (`docker` or `podman`).
     required: false

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-05-27
+
+Patch release fixing a packaging bug that prevented any PyPI install
+from running ``cepheus ci`` / ``cepheus enumerate``: the POSIX-shell
+enumerator script was missing from the published wheel. Also lands
+the standalone ``Su1ph3r/cepheus-action`` repository setup.
+
+### Fixed
+
+- **Enumerator shell script now bundled inside the wheel.**
+  ``enumerator/cepheus-enum.sh`` lived at the repo root, outside
+  ``src/cepheus/``. Hatchling's wheel build only includes
+  ``src/cepheus/``, so every pre-0.6.3 PyPI install shipped without
+  the script and ``cepheus ci nginx:latest`` failed with
+  ``Error: Cannot find cepheus-enum.sh``. The bug has existed since
+  v0.5.0 but only surfaced with v0.6.1 (the first PyPI release).
+  Moved the script to ``src/cepheus/enumerator/cepheus-enum.sh``
+  (now a proper Python sub-package with ``__init__.py``);
+  ``cepheus.cli._find_enumerator_script`` resolves it via
+  ``Path(__file__).parent / "enumerator" / "cepheus-enum.sh"`` so
+  every install layout (editable, wheel, future PyInstaller-frozen)
+  works. Two fallback paths kept for backwards compatibility with
+  pre-0.6.3 working copies. Local wheel-build verification confirms
+  ``cepheus/enumerator/cepheus-enum.sh`` ships in the published
+  artifact.
+- **Action `cache: pip` removed from `setup-python` step.** The
+  composite action's setup-python step had ``cache: pip``, which
+  errors hard when the consumer's checkout contains no
+  ``requirements.txt`` / ``pyproject.toml`` — the common case for
+  consumer repos that ``docker build`` then scan with no in-tree
+  Python project. The cache saved ~2-3s on a ~10s install while
+  costing real consumer-side breakage; drop it. Mirrors the same
+  fix in ``Su1ph3r/cepheus-action``.
+
 ### Added
 
 - **Standalone `Su1ph3r/cepheus-action` GitHub repository** — the
@@ -22,10 +56,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   creates a same-named release + tag on the standalone repo. Cross-
   repo writes use a fine-grained PAT scoped to the standalone repo
   only (`Contents: read+write`) — the workflow's own `GITHUB_TOKEN`
-  stays read-only. Idempotent — re-runs on the same tag skip already-
-  committed contents and already-created releases.
+  stays read-only. Preserves the standalone repo's `.github/`
+  directory across syncs so its own self-test workflow survives.
+  Idempotent — re-runs on the same tag skip already-committed
+  contents and already-created releases.
 - `README.md` — new "GitHub Actions integration" section pointing
   consumers at `Su1ph3r/cepheus-action`.
+
+### Changed
+
+- `.github/workflows/ci.yml` ``enumerator-shell-lint`` job now
+  lints at the new path ``src/cepheus/enumerator/cepheus-enum.sh``.
+- `tests/test_enumerator.py` updated to reference the new path.
+- `docs/ARCHITECTURE.md` directory-layout diagram updated.
+- `tests/fixtures/k8s-goat/README.md` example ``ENUM=...`` path
+  updated.
+- `README.md` ``docker cp`` example path updated.
 
 ## [0.6.2] - 2026-05-27
 

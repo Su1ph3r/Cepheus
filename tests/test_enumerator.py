@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = Path(__file__).parent.parent / "enumerator" / "cepheus-enum.sh"
+SCRIPT_PATH = Path(__file__).parent.parent / "src" / "cepheus" / "enumerator" / "cepheus-enum.sh"
 
 
 # ---------------------------------------------------------------------------

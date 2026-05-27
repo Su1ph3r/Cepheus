@@ -29,7 +29,7 @@ brew install cepheus
 scoop install https://raw.githubusercontent.com/Su1ph3r/Cepheus/main/scoop/cepheus.json
 
 # pip (existing Python env)
-pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.2
+pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.3
 
 # Source (contributors)
 git clone https://github.com/su1ph3r/Cepheus.git && cd Cepheus
@@ -40,10 +40,11 @@ pip install -e '.[dev,html,llm]'
 
 ```bash
 # enumerate a running container
-docker cp enumerator/cepheus-enum.sh mycontainer:/tmp/
+docker cp src/cepheus/enumerator/cepheus-enum.sh mycontainer:/tmp/
 docker exec mycontainer sh /tmp/cepheus-enum.sh > posture.json
 
-# or use the built-in enumerate command
+# or use the built-in enumerate command (preferred — bundled script,
+# no path management needed)
 cepheus enumerate --container-id mycontainer --runtime docker -o posture.json
 ```
 
@@ -88,7 +89,7 @@ Cepheus ships a dedicated GitHub Action at
 for one-line CI integration:
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.6.2
+- uses: Su1ph3r/cepheus-action@v0.6.3
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical

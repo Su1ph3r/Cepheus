@@ -528,15 +528,33 @@ def diff(
 
 
 def _find_enumerator_script() -> Path:
-    """Locate the enumerator shell script — package-relative first, then
-    CWD-relative for in-development runs. Exits 1 if not found."""
+    """Locate the enumerator shell script.
+
+    Primary location is bundled inside the package
+    (``src/cepheus/enumerator/cepheus-enum.sh``) so a wheel install
+    finds the script via ``Path(__file__).parent``. Two fallbacks
+    cover (1) anyone running off a working copy that still has the
+    pre-0.6.3 repo-root layout, and (2) ad-hoc runs from a checkout
+    where the script is reachable via CWD. Exits 1 if no fallback
+    matches — that's the failure mode every pre-0.6.3 PyPI install
+    silently shipped.
+    """
+    # 1. Bundled-with-package (correct location for wheel installs).
+    script_path = Path(__file__).parent / "enumerator" / "cepheus-enum.sh"
+    if script_path.exists():
+        return script_path
+    # 2. Pre-0.6.3 repo-root location (for editable installs of the
+    #    legacy layout — if someone has a stale checkout). Three
+    #    .parent calls walk: cli.py → cepheus/ → src/ → repo-root.
     script_path = Path(__file__).parent.parent.parent / "enumerator" / "cepheus-enum.sh"
-    if not script_path.exists():
-        script_path = Path("enumerator/cepheus-enum.sh")
-    if not script_path.exists():
-        console.print("[red]Error: Cannot find cepheus-enum.sh[/red]")
-        raise typer.Exit(1)
-    return script_path
+    if script_path.exists():
+        return script_path
+    # 3. CWD-relative final fallback for ad-hoc usage from a checkout.
+    script_path = Path("enumerator/cepheus-enum.sh")
+    if script_path.exists():
+        return script_path
+    console.print("[red]Error: Cannot find cepheus-enum.sh[/red]")
+    raise typer.Exit(1)
 
 
 # Wall-clock cap on enumerator subprocess invocations. The enumerator
