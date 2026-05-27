@@ -1,0 +1,46 @@
+{{- if .Values.tls.certManager.enabled }}
+{{- if not .Values.tls.certManager.issuerName }}
+# Chart-managed self-signed Issuer — used when the operator hasn't
+# pointed us at an existing cert-manager Issuer / ClusterIssuer.
+# Self-signed is acceptable for admission webhooks because the
+# clientConfig.caBundle gets injected from this same Certificate's CA,
+# so kube-apiserver explicitly trusts the cert without needing a
+# public CA chain.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "cepheus-admission.issuerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "cepheus-admission.tlsSecretName" . }}
+  duration: {{ .Values.tls.certManager.duration }}
+  renewBefore: {{ .Values.tls.certManager.renewBefore }}
+  subject:
+    organizations:
+      - cepheus.io
+  commonName: {{ include "cepheus-admission.fullname" . }}.{{ .Release.Namespace }}.svc
+  # DNS SANs must cover BOTH the in-cluster service name AND the
+  # cross-namespace FQDN so kube-apiserver's connection matches.
+  dnsNames:
+    - {{ include "cepheus-admission.fullname" . }}
+    - {{ include "cepheus-admission.fullname" . }}.{{ .Release.Namespace }}
+    - {{ include "cepheus-admission.fullname" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "cepheus-admission.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: {{ include "cepheus-admission.issuerName" . }}
+    kind: {{ .Values.tls.certManager.issuerKind }}
+    group: cert-manager.io
+{{- end }}

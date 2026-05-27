@@ -1,0 +1,37 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  {{- if .Values.tls.certManager.enabled }}
+  annotations:
+    # cert-manager auto-populates clientConfig.caBundle from the
+    # Certificate referenced below. Without this annotation the
+    # webhook fails with x509: certificate signed by unknown authority.
+    cert-manager.io/inject-ca-from: "{{ .Release.Namespace }}/{{ include "cepheus-admission.fullname" . }}-tls"
+  {{- end }}
+webhooks:
+  - name: pods.cepheus.io
+    clientConfig:
+      service:
+        name: {{ include "cepheus-admission.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate
+        port: {{ .Values.service.port }}
+      {{- if and (not .Values.tls.certManager.enabled) .Values.tls.existingSecret }}
+      # When using an existing secret without cert-manager, the operator
+      # is responsible for providing the CA bundle separately — either
+      # via an out-of-band patch to this ValidatingWebhookConfiguration
+      # or by including the CA in the existingSecret as `ca.crt` and
+      # using a sidecar / init script to populate this field.
+      {{- end }}
+    rules:
+      {{- toYaml .Values.webhookConfig.rules | nindent 6 }}
+    namespaceSelector:
+      {{- toYaml .Values.webhookConfig.namespaceSelector | nindent 6 }}
+    failurePolicy: {{ .Values.webhookConfig.failurePolicy }}
+    matchPolicy: {{ .Values.webhookConfig.matchPolicy }}
+    sideEffects: {{ .Values.webhookConfig.sideEffects }}
+    timeoutSeconds: {{ .Values.webhookConfig.timeoutSeconds }}
+    admissionReviewVersions: ["v1"]

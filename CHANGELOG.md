@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-27
+
+Adds Kubernetes admission webhook mode. `cepheus admission-server`
+runs as a `ValidatingAdmissionWebhook`; on `kubectl apply -f pod.yaml`,
+kube-apiserver hands the PodSpec to Cepheus, which converts it to a
+synthetic `ContainerPosture`, runs the full analyzer pipeline, and
+returns allow/deny based on configured gates. Pods are blocked before
+the kubelet ever schedules them.
+
+### Added
+
+- **`cepheus.importers.podspec`** — new module. `posture_from_podspec(spec)`
+  converts a Kubernetes PodSpec dict (from an AdmissionReview request
+  or `kubectl get pod -o json`) into a `ContainerPosture`. Extracts:
+  - Capability set (Docker defaults + securityContext.capabilities.add
+    − drop; `privileged: true` grants ALL caps).
+  - Host-namespace flags (`hostPID` / `hostIPC` / `hostNetwork` → the
+    corresponding `NamespaceInfo` field inverted).
+  - hostPath mounts → `mounts[]` + `writable_paths[]`.
+  - Docker / containerd / CRI-O socket reachability via hostPath
+    detection.
+  - Service-account token availability (default-true unless
+    `automountServiceAccountToken: false`).
+  - RuntimeClass → sandbox runtime (gvisor, kata, firecracker).
+  - Multi-container pods produce the UNION of all containers'
+    surfaces (any privileged container → privileged pod, etc.).
+- **`cepheus.server.admission`** — new module. HTTPS server (stdlib
+  `ThreadingHTTPServer` + `ssl.wrap_socket`, zero new runtime deps)
+  exposing:
+  - `POST /validate` — AdmissionReview v1 handler.
+  - `GET /healthz`, `GET /readyz` — kubelet probes (plaintext HTTP
+    on a separate port; default 8080).
+  - `_handle_admission(body, cfg)` — pure function used directly by
+    unit tests so test runs don't need TLS plumbing.
+  - Request bodies capped at 1 MB (DoS shield).
+  - Fail-open (default) admits-with-warning via the AdmissionResponse
+    `warnings[]` array on internal error; fail-closed denies.
+  - Kernel-CVE techniques EXCLUDED from gate decisions by default
+    (`--include-kernel-cves` to opt in) — they need a runtime kernel
+    version which PodSpec doesn't carry; including them
+    false-positives every pod.
+- **`cepheus admission-server` CLI subcommand.** Flags: `--port`,
+  `--cert-file`, `--key-file`, `--bind`, `--health-port`,
+  `--max-severity`, `--baseline`, `--fail-on-new`,
+  `--include-kernel-cves`, `--fail-open` / `--fail-closed`.
+  Configuration errors (missing baseline with `--fail-on-new`,
+  invalid severity, unreadable cert / baseline) exit 2 at startup so
+  misconfigured deployments don't run silently broken.
+- **`charts/cepheus-admission/`** — Helm chart. Components:
+  - `Deployment` with 2 replicas, locked-down `podSecurityContext`
+    (non-root, read-only root FS, dropped caps, RuntimeDefault
+    seccomp).
+  - `Service` (ClusterIP, 443 → 8443).
+  - `ValidatingWebhookConfiguration` scoped to Pod CREATE, excludes
+    `kube-system` by default; configurable per-namespace via
+    `namespaceSelector`.
+  - cert-manager `Issuer` + `Certificate` for TLS (auto-injects the
+    CA bundle into the VWC via `cert-manager.io/inject-ca-from`);
+    bring-your-own-secret + self-signed alternatives also supported.
+  - `ServiceAccount` (with `automountServiceAccountToken: false` —
+    the admission server doesn't need K8s API access).
+  - `PodDisruptionBudget` (minAvailable: 1) so cluster maintenance
+    doesn't all-replicas-down the webhook.
+  - Optional `ConfigMap` for the baseline, mounted at
+    `/etc/cepheus/baseline/baseline.json`.
+- **`docs/ADMISSION.md`** — deployment guide. Quickstart, what the
+  gate evaluates per category, per-namespace scoping, TLS modes,
+  per-distribution notes (kind / EKS / GKE / OpenShift), baseline
+  update flow, troubleshooting.
+- 36 new tests across `tests/test_importers/test_podspec.py` and
+  `tests/test_server/test_admission.py`. Covers cap normalization,
+  privileged-container detection, multi-container union, namespace
+  inversion, hostPath / emptyDir distinction, socket detection,
+  sandbox runtime detection, end-to-end privileged-pod → critical
+  chains, end-to-end hardened-pod → zero evaluable criticals, kernel-CVE
+  filter behaviour, fail-open vs fail-closed paths, load-time config
+  validation.
+
+### Changed
+
+- `cepheus-action`'s default `cepheus-version` bumped from `0.4.2` →
+  `0.5.0`.
+
+### Notes
+
+- The admission webhook requires cert-manager for the default install
+  path. Bring-your-own-secret and self-signed alternatives are
+  available via `values.yaml`.
+- Kernel CVE chains are excluded from admission decisions by default
+  because PodSpec doesn't carry a kernel version. After admission,
+  run `cepheus verify` against the running pod for the runtime-side
+  check (kernel CVEs still won't have verifiers in most cases, but
+  the verifier catches the capability / mount / socket / cap-derived
+  primitives that DO have probes).
+- Multi-container pods: the importer takes the UNION of all
+  containers' surfaces, including init containers. This is the right
+  model — any container being compromised gives an attacker
+  pod-namespace-level access to the rest.
+
 ## [0.4.2] - 2026-05-26
 
 Adds prebuilt native binaries, a GHCR container image, Homebrew tap,
@@ -853,7 +952,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...v0.4.2
 [0.4.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...v0.3.5

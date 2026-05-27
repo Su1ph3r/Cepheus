@@ -983,6 +983,123 @@ def enumerate(
         console.print(posture_json)
 
 
+@app.command(name="admission-server")
+def admission_server(
+    port: int = typer.Option(8443, "--port", help="TLS port the webhook listens on."),
+    cert_file: Path = typer.Option(
+        ...,
+        "--cert-file",
+        help="Path to the PEM-encoded TLS certificate (full chain).",
+    ),
+    key_file: Path = typer.Option(
+        ...,
+        "--key-file",
+        help="Path to the PEM-encoded private key.",
+    ),
+    bind_addr: str = typer.Option(
+        "0.0.0.0",  # noqa: S104 — webhook must accept connections from kube-apiserver
+        "--bind",
+        help="Bind address. Default 0.0.0.0; tighten to a specific interface for stricter network isolation.",
+    ),
+    health_port: int = typer.Option(
+        8080,
+        "--health-port",
+        help="Plaintext-HTTP port for kubelet probes (/healthz, /readyz). Set to 0 to disable.",
+    ),
+    max_severity: SeverityFilter | None = typer.Option(
+        None,
+        "--max-severity",
+        "-m",
+        help="Deny pods whose analysis produces any chain at this severity or higher.",
+    ),
+    baseline: Path | None = typer.Option(
+        None,
+        "--baseline",
+        "-b",
+        help="Path to a Cepheus report (JSON or SARIF). Pair with --fail-on-new for regression-only gating.",
+    ),
+    fail_on_new: bool = typer.Option(
+        False,
+        "--fail-on-new",
+        help="Deny pods that introduce chains absent from --baseline. Requires --baseline.",
+    ),
+    include_kernel_cves: bool = typer.Option(
+        False,
+        "--include-kernel-cves",
+        help=(
+            "Include kernel-CVE techniques in the gate decision. Default OFF because "
+            "kernel CVEs need a runtime kernel version which PodSpec doesn't carry; "
+            "they fall back to confidence_if_absent and false-positive otherwise. "
+            "Turn ON only if you've audited your nodes' kernel posture out-of-band."
+        ),
+    ),
+    fail_open: bool = typer.Option(
+        True,
+        "--fail-open/--fail-closed",
+        help=(
+            "On internal error (analyzer crash, malformed input), --fail-open admits the "
+            "pod with a warning; --fail-closed denies it. Defaults to fail-open matching "
+            "Kubernetes' default ValidatingWebhookConfiguration failurePolicy."
+        ),
+    ),
+) -> None:
+    """Run as a Kubernetes ValidatingAdmissionWebhook.
+
+    Listens for AdmissionReview requests on POST /validate, converts
+    the PodSpec into a synthetic ContainerPosture via the same analyzer
+    pipeline `cepheus analyze` uses, evaluates the configured gates,
+    and returns allow/deny.
+
+    Deployment: install via the Helm chart at charts/cepheus-admission/
+    (cert-manager required for automatic TLS cert provisioning). See
+    docs/ADMISSION.md for the full deployment guide.
+
+    Exit codes: this command does not exit cleanly under normal
+    operation — it blocks until the process is killed. Configuration
+    errors (missing --baseline with --fail-on-new, invalid
+    --max-severity, unreadable baseline) exit 2 at startup.
+    """
+    from cepheus.server.admission import load_admission_config, serve
+
+    try:
+        cfg = load_admission_config(
+            max_severity=max_severity.value if max_severity else None,
+            baseline_path=baseline,
+            fail_on_new=fail_on_new,
+            include_kernel_cves=include_kernel_cves,
+            fail_open_on_error=fail_open,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(2)
+
+    if max_severity is None and not fail_on_new:
+        console.print(
+            "[yellow]Warning: no gate configured (--max-severity / --fail-on-new not set). "
+            "Server will log analysis results but admit every pod.[/yellow]"
+        )
+
+    if not cert_file.exists():
+        console.print(f"[red]Error: --cert-file not found: {cert_file}[/red]")
+        raise typer.Exit(2)
+    if not key_file.exists():
+        console.print(f"[red]Error: --key-file not found: {key_file}[/red]")
+        raise typer.Exit(2)
+
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    serve(
+        cfg,
+        bind_addr=bind_addr,
+        port=port,
+        cert_file=cert_file,
+        key_file=key_file,
+        health_port=health_port if health_port > 0 else None,
+    )
+
+
 @app.command()
 def techniques(
     category: str | None = typer.Option(None, "--category", "-c", help="Filter by category"),

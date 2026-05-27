@@ -1,0 +1,26 @@
+apiVersion: v2
+name: cepheus-admission
+description: |-
+  ValidatingAdmissionWebhook for Cepheus — blocks Kubernetes pods whose
+  PodSpec contains container-escape paths (privileged + hostPath, dropped
+  SA-token isolation, hostPID + writable /proc, etc.) at apply time.
+type: application
+
+# Chart version follows the cepheus binary version pinned in
+# values.yaml — bump together so consumers can rely on the chart
+# minor matching the binary minor.
+version: 0.5.0
+appVersion: "0.5.0"
+
+home: https://github.com/Su1ph3r/Cepheus
+sources:
+  - https://github.com/Su1ph3r/Cepheus
+maintainers:
+  - name: Su1ph3r
+    url: https://github.com/Su1ph3r
+keywords:
+  - security
+  - container-security
+  - kubernetes
+  - admission-webhook
+  - container-escape

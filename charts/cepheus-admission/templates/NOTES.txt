@@ -1,0 +1,42 @@
+Cepheus admission webhook installed.
+
+  Release:   {{ .Release.Name }}
+  Namespace: {{ .Release.Namespace }}
+  Image:     {{ .Values.image.repository }}:{{ .Values.image.tag }}
+
+{{- if .Values.gate.maxSeverity }}
+Severity gate: blocks pods with chains at severity >= {{ .Values.gate.maxSeverity }}.
+{{- end }}
+{{- if and .Values.gate.failOnNew (or .Values.baseline.contents .Values.gate.baselinePath) }}
+Baseline gate: blocks pods that introduce chains absent from the baseline.
+{{- end }}
+{{- if not .Values.gate.maxSeverity }}
+{{- if not .Values.gate.failOnNew }}
+
+  ⚠️  No gate configured. The webhook will log analysis but admit
+      every pod. Set `gate.maxSeverity` and/or `gate.failOnNew` to
+      actually enforce a policy.
+{{- end }}
+{{- end }}
+
+Failure policy: {{ .Values.webhookConfig.failurePolicy }}
+  {{- if eq .Values.webhookConfig.failurePolicy "Fail" }}
+  → If the webhook is unreachable, pod CREATE will be DENIED.
+  {{- else }}
+  → If the webhook is unreachable, pod CREATE will be ADMITTED (silent bypass).
+  {{- end }}
+
+Verify the webhook is responding:
+
+  kubectl get validatingwebhookconfiguration {{ include "cepheus-admission.fullname" . }} -o yaml
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Test the gate with a privileged pod (should be DENIED if gate.maxSeverity is set):
+
+  kubectl run cepheus-gate-test --image=nginx --privileged --rm -i --tty -- echo ok
+
+The webhook's own pods are EXCLUDED from gating (kubernetes.io/metadata.name
+NotIn kube-system by default) — extend `webhookConfig.namespaceSelector` to
+exclude more namespaces if needed.
+
+Full operator guide: https://github.com/Su1ph3r/Cepheus/blob/main/docs/ADMISSION.md

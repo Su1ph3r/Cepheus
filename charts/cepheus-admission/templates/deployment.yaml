@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cepheus-admission.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "cepheus-admission.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Force pod restart when the TLS secret or baseline changes —
+        # without this, the pod keeps the cached cert/baseline indefinitely.
+        checksum/tls: {{ include "cepheus-admission.tlsSecretName" . | sha256sum }}
+        {{- if .Values.baseline.contents }}
+        checksum/baseline: {{ .Values.baseline.contents | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cepheus-admission.fullname" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.image.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: admission
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - admission-server
+            - --cert-file=/etc/cepheus/tls/tls.crt
+            - --key-file=/etc/cepheus/tls/tls.key
+            - --port=8443
+            - --health-port=8080
+            {{- if .Values.gate.maxSeverity }}
+            - --max-severity={{ .Values.gate.maxSeverity }}
+            {{- end }}
+            {{- if .Values.baseline.contents }}
+            - --baseline=/etc/cepheus/baseline/baseline.json
+            {{- else if .Values.gate.baselinePath }}
+            - --baseline={{ .Values.gate.baselinePath }}
+            {{- end }}
+            {{- if .Values.gate.failOnNew }}
+            - --fail-on-new
+            {{- end }}
+            {{- if .Values.gate.includeKernelCves }}
+            - --include-kernel-cves
+            {{- end }}
+            {{- if .Values.failOpen }}
+            - --fail-open
+            {{- else }}
+            - --fail-closed
+            {{- end }}
+          ports:
+            - name: webhook
+              containerPort: 8443
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: tls
+              mountPath: /etc/cepheus/tls
+              readOnly: true
+            {{- if .Values.baseline.contents }}
+            - name: baseline
+              mountPath: /etc/cepheus/baseline
+              readOnly: true
+            {{- end }}
+            # readOnlyRootFilesystem requires writable /tmp for Python's
+            # default tempfile + any Rich console caching.
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ include "cepheus-admission.tlsSecretName" . }}
+        {{- if .Values.baseline.contents }}
+        - name: baseline
+          configMap:
+            name: {{ include "cepheus-admission.fullname" . }}-baseline
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

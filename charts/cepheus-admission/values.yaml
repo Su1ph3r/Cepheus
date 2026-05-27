@@ -1,0 +1,193 @@
+# Cepheus admission-webhook chart values.
+#
+# Minimum viable deployment:
+#   helm install cepheus-admission charts/cepheus-admission \
+#     --namespace cepheus-system --create-namespace \
+#     --set gate.maxSeverity=critical
+#
+# That installs the webhook with cert-manager-issued TLS, watching all
+# namespaces, blocking pods that produce any critical chain.
+
+image:
+  repository: ghcr.io/su1ph3r/cepheus
+  # Pin to a specific tag — :latest is convenient but breaks the
+  # "what version is deployed" question in incident response.
+  tag: "0.5.0"
+  pullPolicy: IfNotPresent
+  # imagePullSecrets: [name: my-pull-secret]
+  imagePullSecrets: []
+
+replicaCount: 2
+
+# Gate configuration — at least one of maxSeverity / failOnNew must be
+# set, otherwise the webhook logs every decision but never denies (you
+# probably want to set one of these before turning the webhook on).
+gate:
+  # One of: "", low, medium, high, critical. Empty disables the severity gate.
+  maxSeverity: "critical"
+
+  # Path to a baseline file (JSON or SARIF) inside the pod. Typically
+  # injected via a ConfigMap mounted at /etc/cepheus/baseline.{json,sarif}.
+  # Empty disables the baseline gate.
+  baselinePath: ""
+
+  # Deny pods whose analysis introduces chains absent from baselinePath.
+  # Requires baselinePath. No-op when baselinePath is empty.
+  failOnNew: false
+
+  # Include kernel-CVE techniques in the gate decision. Default false
+  # because kernel CVEs need a runtime kernel version which PodSpec
+  # doesn't carry — they false-positive otherwise. Turn on only if
+  # you've audited your nodes' kernel posture out-of-band.
+  includeKernelCves: false
+
+# Optional ConfigMap source for the baseline. When set, the chart
+# creates a ConfigMap named ${release}-baseline with this content and
+# mounts it at /etc/cepheus/baseline.json. Sets gate.baselinePath
+# automatically — do NOT also set gate.baselinePath manually.
+#
+# Example:
+#   baseline:
+#     contents: |
+#       {"chains": [...]}
+baseline:
+  contents: ""
+
+# Behaviour on internal error (analyzer crash, malformed AdmissionReview).
+# failOpen=true admits the pod with a warnings[] entry; false denies.
+# Pair with webhookConfig.failurePolicy below.
+failOpen: true
+
+# ValidatingWebhookConfiguration tuning.
+webhookConfig:
+  # "Fail" (deny on webhook unreachable) or "Ignore" (admit). For a
+  # production cluster running this as the security gate, Fail is the
+  # right choice — kubectl users get a clear error rather than a
+  # silently-admitted vulnerable pod. For initial rollout, Ignore
+  # avoids breaking the cluster if the webhook goes down.
+  failurePolicy: "Ignore"
+
+  # Webhook timeout. Cepheus analysis is sub-100ms; 10s is generous.
+  timeoutSeconds: 10
+
+  # Equivalent / Exact. Equivalent matches v1/v1beta1 of the same
+  # group/resource — safer default.
+  matchPolicy: "Equivalent"
+
+  # Side-effects classification. Cepheus is read-only — None is correct.
+  sideEffects: "None"
+
+  # Admission rules. Default scopes to Pod CREATE in all namespaces.
+  rules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+      scope: "Namespaced"
+
+  # Per-namespace scope. Default empty = all namespaces (excluding
+  # kube-system + cepheus's own namespace — see namespaceSelector below).
+  # Set namespaceSelector.matchLabels to opt in / out specific
+  # namespaces:
+  #   namespaceSelector:
+  #     matchLabels:
+  #       cepheus.io/admission: enabled
+  namespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        # cepheus's own namespace must be excluded or we deadlock
+        # (the webhook pod can't start if the webhook is gating its
+        # own admission).
+        values:
+          - "kube-system"
+
+# TLS certificate provisioning.
+#
+# Three modes:
+#   tls.certManager.enabled=true  — chart creates a cert-manager Issuer
+#       + Certificate; the Certificate's secret is mounted into the
+#       webhook pod. RECOMMENDED for clusters with cert-manager
+#       installed (most production clusters).
+#   tls.existingSecret="my-secret" — bring-your-own cert. Secret must
+#       contain tls.crt + tls.key keys. The chart will NOT manage
+#       rotation; that's on you.
+#   tls.selfSigned=true — chart generates a self-signed cert via a
+#       one-shot Job at install time. Convenient for kind/minikube;
+#       NOT recommended for production (manual rotation, no chain).
+tls:
+  certManager:
+    enabled: true
+    # Issuer kind: "Issuer" (namespaced) or "ClusterIssuer" (cluster-wide).
+    issuerKind: "Issuer"
+    # If empty, the chart creates a self-signed cert-manager Issuer in
+    # the release namespace. Set to an existing Issuer/ClusterIssuer
+    # name to reuse it.
+    issuerName: ""
+    # Certificate duration + renewBefore.
+    duration: "8760h"      # 1 year
+    renewBefore: "720h"    # 30 days
+
+  existingSecret: ""
+
+  selfSigned: false
+
+service:
+  type: ClusterIP
+  port: 443
+  targetPort: 8443
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Pod-level securityContext. Cepheus's own admission pod should be
+# locked down — non-root, read-only root FS, no caps. Eat your own
+# dogfood.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+
+# Probe paths match cepheus.server.admission's /healthz + /readyz on
+# the plaintext health port (--health-port 8080).
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: health
+    scheme: HTTP
+  initialDelaySeconds: 5
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: health
+    scheme: HTTP
+  initialDelaySeconds: 1
+  periodSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# PodDisruptionBudget — protects the webhook from accidental
+# all-replicas-down during cluster maintenance, which would either
+# break admission (failurePolicy: Fail) or silently bypass it (Ignore).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

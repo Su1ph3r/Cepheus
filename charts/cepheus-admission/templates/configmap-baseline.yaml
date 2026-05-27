@@ -1,0 +1,16 @@
+{{- if .Values.baseline.contents }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}-baseline
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+data:
+  # baseline.json is mounted at /etc/cepheus/baseline/baseline.json
+  # inside the admission pod; the deployment passes
+  # --baseline=/etc/cepheus/baseline/baseline.json when this ConfigMap
+  # is present.
+  baseline.json: |
+    {{- .Values.baseline.contents | nindent 4 }}
+{{- end }}
