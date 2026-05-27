@@ -28,8 +28,10 @@ brew install cepheus
 # Scoop (Windows)
 scoop install https://raw.githubusercontent.com/Su1ph3r/Cepheus/main/scoop/cepheus.json
 
-# pip (existing Python env)
-pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.3
+# pip (existing Python env) — PyPI distribution is `cepheus-engine`;
+# the bare name `cepheus` on PyPI is held by an unrelated 2018 package.
+# The installed CLI is still `cepheus` and `import cepheus` still works.
+pip install cepheus-engine
 
 # Source (contributors)
 git clone https://github.com/su1ph3r/Cepheus.git && cd Cepheus
