@@ -180,7 +180,15 @@ runs:
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
-        cache: pip
+        # No ``cache: pip`` here. ``actions/setup-python@v5`` requires a
+        # ``cache-dependency-path`` (or a default-glob match against
+        # ``**/requirements.txt`` / ``**/pyproject.toml``) when pip
+        # caching is enabled, and errors hard when none of those exist
+        # in the consumer's checkout. Many real consumer repos (e.g.
+        # ones that ``docker build`` then scan the image with no Python
+        # project in-tree) hit that failure mode. The pip install of
+        # ``cepheus-engine`` is sub-15s anyway — cache saves marginal
+        # time while costing diagnosability.
 
     - name: Install Cepheus
       shell: bash
