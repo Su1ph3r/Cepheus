@@ -4,7 +4,7 @@
   "homepage": "https://github.com/Su1ph3r/Cepheus",
   "license": "MIT",
   "url": "https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.0/cepheus-windows-amd64.exe",
-  "hash": "2f666ce58a48db7a34bdadb00ed653282d0de64fd9a1b67349214a791be7b51a",
+  "hash": "937dd343fce80778e284eba02ae683f5976c4718cfd795e0c406a67c96c2c213",
   "bin": [
     [
       "cepheus-windows-amd64.exe",

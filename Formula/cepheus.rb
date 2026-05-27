@@ -34,7 +34,7 @@ class Cepheus < Formula
   on_macos do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-darwin-arm64"
-      sha256 "1300447c1c074207d07e055d0782c03f6a83d25e27dc8c222349a545d8f65deb"
+      sha256 "5a13b5e1542a984c485cfd4216a64d5ed02cd702d399d60ebeeb8051d155d5e4"
     end
   end
 
@@ -45,7 +45,7 @@ class Cepheus < Formula
     end
     on_intel do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-linux-amd64"
-      sha256 "587dd395ddd943cc8559c6b671c189ca080c31d5503bb0e2ad73e66027ded588"
+      sha256 "fb1614abe2195675432463628f76b952a94d8468cef917bcb72c7167da0f78a7"
     end
   end
 
