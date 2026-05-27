@@ -24,7 +24,7 @@
 class Cepheus < Formula
   desc "Container Escape Scenario Modeler — enumerate posture, verify primitives"
   homepage "https://github.com/Su1ph3r/Cepheus"
-  version "0.6.1"
+  version "0.6.2"
   license "MIT"
 
   # macOS: Apple Silicon only. Intel Macs can run the arm64 binary under
@@ -34,18 +34,18 @@ class Cepheus < Formula
   on_macos do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-darwin-arm64"
-      sha256 "5a13b5e1542a984c485cfd4216a64d5ed02cd702d399d60ebeeb8051d155d5e4"
+      sha256 "de77dea3c3a6542d387efc148a70613c3b3ba60a1e888151fbdf5c22b518fea2"
     end
   end
 
   on_linux do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-linux-arm64"
-      sha256 "8421ffd2245fce45aa8f6396d05fec7f147a77db8848da7c5a68bc1794af8de6"
+      sha256 "782c0af2b59bc885f12a0cfeb9565f6d6089d65f23011c5534a07974387f8889"
     end
     on_intel do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-linux-amd64"
-      sha256 "fb1614abe2195675432463628f76b952a94d8468cef917bcb72c7167da0f78a7"
+      sha256 "d8554256c7a17e7209451470c148a1ce8452e0e12509c74cc04a19d42ae85e67"
     end
   end
 
