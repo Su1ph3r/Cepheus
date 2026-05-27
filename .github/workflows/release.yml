@@ -148,10 +148,6 @@ jobs:
             runner: ubuntu-24.04-arm
             asset: cepheus-linux-arm64
             exe_suffix: ""
-          - label: darwin-amd64
-            runner: macos-13
-            asset: cepheus-darwin-amd64
-            exe_suffix: ""
           - label: darwin-arm64
             runner: macos-latest
             asset: cepheus-darwin-arm64
@@ -394,13 +390,12 @@ jobs:
           # the python subprocess boundary.
           linux_amd64=$(awk '$2 == "cepheus-linux-amd64"          {print $1}' /tmp/SHA256SUMS)
           linux_arm64=$(awk '$2 == "cepheus-linux-arm64"          {print $1}' /tmp/SHA256SUMS)
-          darwin_amd64=$(awk '$2 == "cepheus-darwin-amd64"        {print $1}' /tmp/SHA256SUMS)
           darwin_arm64=$(awk '$2 == "cepheus-darwin-arm64"        {print $1}' /tmp/SHA256SUMS)
           windows_amd64=$(awk '$2 == "cepheus-windows-amd64.exe"  {print $1}' /tmp/SHA256SUMS)
 
           # Fail loud if any hash is missing — better than silently shipping
           # a half-rewritten formula.
-          for h in "$linux_amd64" "$linux_arm64" "$darwin_amd64" "$darwin_arm64" "$windows_amd64"; do
+          for h in "$linux_amd64" "$linux_arm64" "$darwin_arm64" "$windows_amd64"; do
             if [ -z "$h" ]; then
               echo "::error::Missing sha256 in SHA256SUMS — refusing to rewrite manifests."
               exit 1
@@ -410,7 +405,6 @@ jobs:
           # Export to the workflow env for the python heredoc.
           export LINUX_AMD64="$linux_amd64"
           export LINUX_ARM64="$linux_arm64"
-          export DARWIN_AMD64="$darwin_amd64"
           export DARWIN_ARM64="$darwin_arm64"
           export WINDOWS_AMD64="$windows_amd64"
 
@@ -423,7 +417,6 @@ jobs:
           version       = os.environ["VERSION"]
           linux_amd64   = os.environ["LINUX_AMD64"]
           linux_arm64   = os.environ["LINUX_ARM64"]
-          darwin_amd64  = os.environ["DARWIN_AMD64"]
           darwin_arm64  = os.environ["DARWIN_ARM64"]
           windows_amd64 = os.environ["WINDOWS_AMD64"]
 
@@ -433,14 +426,12 @@ jobs:
           src = re.sub(r'version "[^"]+"', f'version "{version}"', src, count=1)
           src = src.replace("REPLACE_WITH_LINUX_AMD64_SHA256",  linux_amd64)
           src = src.replace("REPLACE_WITH_LINUX_ARM64_SHA256",  linux_arm64)
-          src = src.replace("REPLACE_WITH_DARWIN_AMD64_SHA256", darwin_amd64)
           src = src.replace("REPLACE_WITH_DARWIN_ARM64_SHA256", darwin_arm64)
           # Re-release case (no placeholders left): rewrite any 64-hex sha
           # adjacent to the recognised platform URLs.
           for arch, sha in [
               ("linux-amd64",  linux_amd64),
               ("linux-arm64",  linux_arm64),
-              ("darwin-amd64", darwin_amd64),
               ("darwin-arm64", darwin_arm64),
           ]:
               src = re.sub(

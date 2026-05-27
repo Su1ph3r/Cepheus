@@ -56,11 +56,7 @@ chmod +x cepheus
 curl -L -o cepheus \
   https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-linux-arm64
 
-# macOS Intel
-curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-darwin-amd64
-
-# macOS Apple Silicon
+# macOS Apple Silicon (Intel Macs: use Rosetta — `arch -x86_64 ./cepheus ...`)
 curl -L -o cepheus \
   https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-darwin-arm64
 

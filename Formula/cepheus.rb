@@ -24,17 +24,17 @@
 class Cepheus < Formula
   desc "Container Escape Scenario Modeler — enumerate posture, verify primitives"
   homepage "https://github.com/Su1ph3r/Cepheus"
-  version "0.4.2"
+  version "0.5.1"
   license "MIT"
+
+  # macOS: Apple Silicon only. Intel Macs can run the arm64 binary under
+  # Rosetta 2 via `arch -x86_64 cepheus ...`.
+  depends_on arch: :arm64 if OS.mac?
 
   on_macos do
     on_arm do
       url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-darwin-arm64"
       sha256 "REPLACE_WITH_DARWIN_ARM64_SHA256"
-    end
-    on_intel do
-      url "https://github.com/Su1ph3r/Cepheus/releases/download/v#{version}/cepheus-darwin-amd64"
-      sha256 "REPLACE_WITH_DARWIN_AMD64_SHA256"
     end
   end
 

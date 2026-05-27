@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-27
+
+Drops the prebuilt `cepheus-darwin-amd64` binary from the release matrix.
+The GitHub-hosted `macos-13` runner that produces the Intel Mac native
+binary has been queueing for hours without progress on the last several
+release pipelines, blocking the rest of the asset set from landing.
+Intel Mac users can run the `darwin-arm64` binary under Rosetta 2:
+
+```sh
+arch -x86_64 ./cepheus-darwin-arm64 --version
+```
+
+Homebrew on Intel Macs is no longer supported by the formula. Other
+install paths (`pip`, container, native binaries on linux-amd64,
+linux-arm64, darwin-arm64, windows-amd64, Scoop) are unaffected.
+
+### Changed
+
+- `.github/workflows/release.yml` — `darwin-amd64` removed from the
+  binary matrix; manifest-rewrite step no longer requires a
+  `cepheus-darwin-amd64` checksum.
+- `Formula/cepheus.rb` — `on_macos`/`on_intel` block removed; formula
+  declares `depends_on arch: :arm64` on macOS.
+- `docs/INSTALL.md` — Native-binary section drops the macOS Intel curl
+  example.
+
 ## [0.5.0] - 2026-05-27
 
 Adds Kubernetes admission webhook mode. `cepheus admission-server`
