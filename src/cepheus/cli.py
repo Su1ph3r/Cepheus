@@ -1093,9 +1093,7 @@ def admission_server(
         try:
             client = K8sClient.in_cluster()
         except K8sAPIError as exc:
-            console.print(
-                f"[red]Error: --node-kernel-lookup requested but in-cluster setup failed: {exc}[/red]"
-            )
+            console.print(f"[red]Error: --node-kernel-lookup requested but in-cluster setup failed: {exc}[/red]")
             raise typer.Exit(2)
         try:
             node_cache = NodeKernelCache(

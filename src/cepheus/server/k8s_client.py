@@ -199,9 +199,7 @@ class K8sClient:
         self._token_path = Path(token_path) if token_path is not None else None
         self._request_timeout_sec = request_timeout_sec
         ssl_ctx = (
-            _build_pinned_ssl_context(Path(ca_cert_path))
-            if ca_cert_path is not None
-            else ssl.create_default_context()
+            _build_pinned_ssl_context(Path(ca_cert_path)) if ca_cert_path is not None else ssl.create_default_context()
         )
         self._opener = _build_opener(ssl_ctx)
 
@@ -236,9 +234,7 @@ class K8sClient:
                 "expected a DNS name, IPv4 address, or bracketed IPv6 literal"
             )
         if not _PORT_RE.match(port):
-            raise K8sAPIError(
-                f"KUBERNETES_SERVICE_PORT has unexpected format: {port!r} — expected a port number"
-            )
+            raise K8sAPIError(f"KUBERNETES_SERVICE_PORT has unexpected format: {port!r} — expected a port number")
         port_int = int(port)
         if not (1 <= port_int <= 65535):
             raise K8sAPIError(f"KUBERNETES_SERVICE_PORT out of range: {port_int}")
@@ -305,9 +301,7 @@ class K8sClient:
             try:
                 token = self._token_path.read_text(encoding="utf-8").strip()
             except OSError as exc:
-                raise K8sAPIError(
-                    f"could not read ServiceAccount token at {self._token_path}: {exc}"
-                ) from exc
+                raise K8sAPIError(f"could not read ServiceAccount token at {self._token_path}: {exc}") from exc
             if not token:
                 raise K8sAPIError(
                     f"ServiceAccount token at {self._token_path} is empty — "
@@ -346,8 +340,7 @@ class K8sClient:
                 data = response.read(_MAX_RESPONSE_BYTES + 1)
                 if len(data) > _MAX_RESPONSE_BYTES:
                     raise K8sAPIError(
-                        f"apiserver response exceeds {_MAX_RESPONSE_BYTES} byte cap — "
-                        "refusing to read further"
+                        f"apiserver response exceeds {_MAX_RESPONSE_BYTES} byte cap — refusing to read further"
                     )
                 return data
         except urllib.error.HTTPError as exc:
@@ -355,8 +348,7 @@ class K8sClient:
             # lacks `nodes: list`. Surface the status code so the
             # operator sees it in logs / readyz.
             raise K8sAPIError(f"apiserver returned HTTP {exc.code}: {exc.reason}") from exc
-        except (urllib.error.URLError, socket.timeout, OSError, ssl.SSLError,
-                http.client.HTTPException) as exc:
+        except (urllib.error.URLError, socket.timeout, OSError, ssl.SSLError, http.client.HTTPException) as exc:
             # ``http.client.HTTPException`` covers ``IncompleteRead``,
             # ``BadStatusLine``, ``LineTooLong`` — transport-layer
             # protocol errors that the default catch list misses, and
@@ -542,9 +534,7 @@ class NodeKernelCache:
                 last_error="",
             )
         if not new_kernels:
-            logger.info(
-                "node-kernel refresh ok but cluster has 0 nodes reporting kernel data"
-            )
+            logger.info("node-kernel refresh ok but cluster has 0 nodes reporting kernel data")
         else:
             logger.debug(
                 "node-kernel refresh ok: nodes=%d distinct_kernels=%d",
@@ -566,9 +556,7 @@ class NodeKernelCache:
         try:
             self._refresh_once()
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.exception(
-                "node-kernel refresh thread caught unexpected error; continuing"
-            )
+            logger.exception("node-kernel refresh thread caught unexpected error; continuing")
             with self._lock:
                 self._snapshot = CacheSnapshot(
                     kernel_versions=self._snapshot.kernel_versions,

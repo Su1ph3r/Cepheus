@@ -343,14 +343,9 @@ def _cache_unhealthy_reason(cfg: AdmissionConfig) -> str | None:
         return None
     snap = cache.snapshot()
     if snap.last_refresh_at == 0 and not snap.kernel_versions:
-        return (
-            f"node-kernel cache has no usable snapshot (last_error={snap.last_error!r})"
-        )
+        return f"node-kernel cache has no usable snapshot (last_error={snap.last_error!r})"
     if snap.last_error and (time.time() - snap.last_refresh_at) > 3 * cache.refresh_interval_sec:
-        return (
-            f"node-kernel cache refresh failing for >3 intervals "
-            f"(last_error={snap.last_error!r})"
-        )
+        return f"node-kernel cache refresh failing for >3 intervals (last_error={snap.last_error!r})"
     return None
 
 
@@ -417,9 +412,7 @@ class AdmissionHandler(BaseHTTPRequestHandler):
             cfg: AdmissionConfig = self.server.cepheus_config  # type: ignore[attr-defined]
             unhealthy_reason = _cache_unhealthy_reason(cfg)
             if unhealthy_reason is not None:
-                body = json.dumps(
-                    {"ready": False, "reason": unhealthy_reason}
-                ).encode("utf-8") + b"\n"
+                body = json.dumps({"ready": False, "reason": unhealthy_reason}).encode("utf-8") + b"\n"
                 # 503 propagates to the ValidatingWebhookConfiguration's
                 # ``failurePolicy``; operators with ``failurePolicy: Fail``
                 # will see admissions blocked while the cache is

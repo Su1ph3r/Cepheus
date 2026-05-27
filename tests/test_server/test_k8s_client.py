@@ -217,12 +217,12 @@ def test_in_cluster_raises_without_env(monkeypatch):
 @pytest.mark.parametrize(
     "host",
     [
-        "evil.example.com/foo",            # path injection
-        "user@attacker.com",                # userinfo injection
-        "kubernetes.default.svc:443",       # smuggled port via host
-        "http://evil",                      # scheme smuggling
+        "evil.example.com/foo",  # path injection
+        "user@attacker.com",  # userinfo injection
+        "kubernetes.default.svc:443",  # smuggled port via host
+        "http://evil",  # scheme smuggling
         "host with spaces",
-        "",                                 # caught earlier but exercise the regex
+        "",  # caught earlier but exercise the regex
     ],
 )
 def test_in_cluster_rejects_malformed_host(host, monkeypatch):
@@ -282,10 +282,7 @@ def test_token_path_is_reread_on_every_request(monkeypatch, tmp_path):
     token_file.write_text("token-v2-after-rotation", encoding="utf-8")
     client.list_nodes()
 
-    auth_headers = [
-        {k.lower(): v for k, v in c["headers"].items()}["authorization"]
-        for c in captured
-    ]
+    auth_headers = [{k.lower(): v for k, v in c["headers"].items()}["authorization"] for c in captured]
     assert auth_headers == [
         "Bearer token-v1",
         "Bearer token-v2-after-rotation",
@@ -341,8 +338,12 @@ def test_no_redirect_handler_refuses_redirect_directly():
     handler = _NoRedirectHandler()
     with pytest.raises(K8sAPIError, match="refusing to follow"):
         handler.redirect_request(
-            req=None, fp=None, code=302, msg="Found",
-            headers={}, newurl="https://attacker.example.com/api/v1/nodes",
+            req=None,
+            fp=None,
+            code=302,
+            msg="Found",
+            headers={},
+            newurl="https://attacker.example.com/api/v1/nodes",
         )
 
 
@@ -442,9 +443,7 @@ def test_cache_preserves_last_known_set_when_refresh_returns_empty():
         assert cache.snapshot().kernel_versions == frozenset({"5.15.0-76-generic"})
         cache._refresh_once()
         snap = cache.snapshot()
-        assert snap.kernel_versions == frozenset({"5.15.0-76-generic"}), (
-            "empty refresh must not empty the kernel set"
-        )
+        assert snap.kernel_versions == frozenset({"5.15.0-76-generic"}), "empty refresh must not empty the kernel set"
         assert "preserved prior set" in snap.last_error
     finally:
         cache.stop()
@@ -494,9 +493,9 @@ def test_one_tick_catches_unexpected_exception_and_records_it():
     that escaped ``_refresh_once`` (which itself only catches
     K8sAPIError) and records it into ``last_error`` so ``/readyz``
     surfaces the failure instead of silently freezing the cache."""
-    cache = NodeKernelCache(_StubClient(
-        nodes_sequence=[[NodeInfo(name="n", kernel_version="5.15.0-76-generic")]]
-    ), refresh_interval_sec=5.0)
+    cache = NodeKernelCache(
+        _StubClient(nodes_sequence=[[NodeInfo(name="n", kernel_version="5.15.0-76-generic")]]), refresh_interval_sec=5.0
+    )
     try:
         cache.start(fetch_now=True)
         assert cache.snapshot().kernel_versions == frozenset({"5.15.0-76-generic"})
@@ -538,9 +537,7 @@ def test_cache_preserves_last_known_set_on_refresh_failure():
         # Trigger a manual refresh that hits the failure.
         cache._refresh_once()
         snap = cache.snapshot()
-        assert snap.kernel_versions == frozenset({"5.15.0-76-generic"}), (
-            "refresh failure must not empty the kernel set"
-        )
+        assert snap.kernel_versions == frozenset({"5.15.0-76-generic"}), "refresh failure must not empty the kernel set"
         assert "403" in snap.last_error
     finally:
         cache.stop()
