@@ -32,18 +32,23 @@ import json
 import logging
 import ssl
 import threading
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from cepheus.config import CepheusConfig
 from cepheus.engine.analyzer import analyze
 from cepheus.engine.baseline import diff as baseline_diff
 from cepheus.engine.baseline import load_baseline
-from cepheus.importers.podspec import posture_from_podspec
+from cepheus.importers.podspec import _parse_kernel_version, posture_from_podspec
+from cepheus.models.posture import KernelInfo
 from cepheus.models.technique import TechniqueCategory
+from cepheus.server.k8s_client import NodeKernelCache
 
 logger = logging.getLogger("cepheus.admission")
 
@@ -88,6 +93,15 @@ class AdmissionConfig:
 
     # Loaded once at startup so per-request work doesn't re-read disk.
     baseline_identities: Any = None
+
+    # Background cache of cluster kernel versions sourced from the K8s
+    # apiserver. When present AND include_kernel_cves is True, each
+    # admission is evaluated against EVERY distinct kernel currently
+    # in the cluster — a pod is denied if it produces a critical chain
+    # under any kernel it could plausibly land on. When None (the
+    # default), kernel CVE chains are dropped from the gate decision
+    # because the PodSpec carries no kernel info.
+    node_kernel_cache: NodeKernelCache | None = None
 
 
 def _evaluable_chains(chains: list, include_kernel_cves: bool) -> list:
@@ -206,15 +220,63 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
         return HTTPStatus.OK, _build_response(uid, allowed=True)
 
     try:
-        posture = posture_from_podspec(
+        # When node-kernel lookup is configured AND the operator has
+        # opted into kernel-CVE gating, evaluate the pod against every
+        # distinct kernel currently in the cluster and union the chain
+        # set. Without a cache (default), or with kernel CVEs disabled,
+        # we run the analyzer once with empty kernel info — the existing
+        # PodSpec-evaluable categories still match correctly.
+        kernels: list[str | None] = [None]
+        if cfg.node_kernel_cache is not None and cfg.include_kernel_cves:
+            snapshot = cfg.node_kernel_cache.snapshot()
+            if snapshot.kernel_versions:
+                kernels = sorted(snapshot.kernel_versions)
+
+        # Parse the PodSpec ONCE. Per-kernel work then is only the
+        # KernelInfo swap + analyzer call — capability/mount/namespace
+        # extraction is identical across kernels and re-running it N
+        # times during a rolling kernel upgrade pegs admission latency
+        # under tight webhook timeoutSeconds.
+        base_posture = posture_from_podspec(
             spec,
             namespace=metadata.get("namespace") or request.get("namespace"),
             pod_name=metadata.get("name") or metadata.get("generateName"),
+            kernel_version=None,
         )
-        result = analyze(posture, cfg.config or CepheusConfig())
-        allowed, reason = _gate_decision(result.chains, cfg)
-    except Exception as exc:
-        logger.exception("Admission analysis failed for uid=%s", uid)
+
+        chain_buckets: list = []
+        for kernel_version in kernels:
+            if kernel_version:
+                major, minor, patch = _parse_kernel_version(kernel_version)
+                posture = base_posture.model_copy(
+                    update={
+                        "kernel": KernelInfo(
+                            version=kernel_version,
+                            major=major,
+                            minor=minor,
+                            patch=patch,
+                        )
+                    }
+                )
+            else:
+                posture = base_posture
+            result = analyze(posture, cfg.config or CepheusConfig())
+            chain_buckets.append(result.chains)
+        all_chains = _union_chains(chain_buckets)
+        allowed, reason = _gate_decision(all_chains, cfg)
+    except (ValueError, KeyError, json.JSONDecodeError, ValidationError) as exc:
+        # Data-shape errors from the PodSpec or analyzer input. These
+        # are KNOWN failure modes (a malformed admission body, a
+        # PodSpec field with the wrong type, a baseline that diverged
+        # from the technique DB). Apply the configured fail-open /
+        # fail-closed policy — that's exactly what the policy exists
+        # to handle.
+        logger.warning(
+            "Admission analysis: bad input for uid=%s: %s: %s",
+            uid,
+            type(exc).__name__,
+            exc,
+        )
         if cfg.fail_open_on_error:
             return HTTPStatus.OK, _build_response(
                 uid,
@@ -226,6 +288,18 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
             allowed=False,
             message=f"Cepheus internal error (fail-closed): {type(exc).__name__}: {exc}",
         )
+    except (AttributeError, TypeError):
+        # Programming bug — analyzer contract violated or attribute
+        # access on a None / wrong type. Do NOT silently fail-open;
+        # this is the failure mode the fail-open policy is most
+        # likely to mask in production. Re-raise so the HTTP handler
+        # returns 500 and the kube-apiserver applies its OWN
+        # failurePolicy (which the operator chose deliberately).
+        logger.exception(
+            "Admission analyzer programming error for uid=%s — this is a bug",
+            uid,
+        )
+        raise
 
     if allowed:
         logger.info(
@@ -233,7 +307,7 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
             uid,
             metadata.get("namespace", ""),
             metadata.get("name") or metadata.get("generateName", ""),
-            len(result.chains),
+            len(all_chains),
         )
     else:
         logger.warning(
@@ -244,6 +318,75 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
             reason,
         )
     return HTTPStatus.OK, _build_response(uid, allowed=allowed, message=reason)
+
+
+def _cache_unhealthy_reason(cfg: AdmissionConfig) -> str | None:
+    """Return a non-empty reason string when the node-kernel cache is
+    in a state that should make ``/readyz`` fail, else None.
+
+    Only flagged when the operator explicitly opted into kernel-CVE
+    gating (``include_kernel_cves`` AND a configured cache): in any
+    other config, kernel CVEs are deliberately not gated and a stale
+    cache is irrelevant.
+
+    Two unhealthy conditions:
+      * Initial fetch never succeeded (``last_refresh_at == 0``) AND
+        we have no kernel data — the webhook would silently admit
+        without gating kernel CVEs.
+      * Last refresh failed AND the snapshot age exceeds three
+        refresh intervals — long enough to be confident the failure
+        is sustained, short enough to surface before a kernel CVE
+        is bypassed via a stale-allow list.
+    """
+    cache = cfg.node_kernel_cache
+    if cache is None or not cfg.include_kernel_cves:
+        return None
+    snap = cache.snapshot()
+    if snap.last_refresh_at == 0 and not snap.kernel_versions:
+        return (
+            f"node-kernel cache has no usable snapshot (last_error={snap.last_error!r})"
+        )
+    if snap.last_error and (time.time() - snap.last_refresh_at) > 3 * cache.refresh_interval_sec:
+        return (
+            f"node-kernel cache refresh failing for >3 intervals "
+            f"(last_error={snap.last_error!r})"
+        )
+    return None
+
+
+def _union_chains(buckets: list) -> list:
+    """De-duplicate chains across multiple analyzer runs (one per
+    cluster kernel version), keyed on ``chain.id`` — the canonical
+    chain identity already used by the analyzer's own per-run dedup
+    (see ``engine.analyzer:138``).
+
+    Kernel-specific techniques produce different chain ids per
+    kernel (their id includes the kernel-CVE technique id, which
+    differs by kernel version), so they survive dedup naturally.
+    Non-kernel chains produce identical ids across kernels and
+    collapse to one entry — which is correct: the same
+    capability/mount finding shouldn't be reported N times just
+    because the cluster has N distinct kernels.
+
+    Using ``chain.id`` rather than a (top_id, rounded_score,
+    severity) tuple is structurally safer: chain.id encodes the
+    full ordered technique-id set, so chains that differ in any
+    step survive dedup, and float-rounding collisions are
+    impossible.
+    """
+    if not buckets:
+        return []
+    if len(buckets) == 1:
+        return list(buckets[0])
+    seen: set[str] = set()
+    out = []
+    for bucket in buckets:
+        for chain in bucket:
+            if chain.id in seen:
+                continue
+            seen.add(chain.id)
+            out.append(chain)
+    return out
 
 
 class AdmissionHandler(BaseHTTPRequestHandler):
@@ -263,7 +406,27 @@ class AdmissionHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path in ("/healthz", "/readyz"):
+        if self.path == "/healthz":
+            # Liveness: is the process responsive? Cache state is not
+            # a liveness concern — a broken cache doesn't justify
+            # killing the pod (which would lose the last-known kernel
+            # snapshot the cache is still serving).
+            self._reply(HTTPStatus.OK, b"ok\n", content_type="text/plain")
+            return
+        if self.path == "/readyz":
+            cfg: AdmissionConfig = self.server.cepheus_config  # type: ignore[attr-defined]
+            unhealthy_reason = _cache_unhealthy_reason(cfg)
+            if unhealthy_reason is not None:
+                body = json.dumps(
+                    {"ready": False, "reason": unhealthy_reason}
+                ).encode("utf-8") + b"\n"
+                # 503 propagates to the ValidatingWebhookConfiguration's
+                # ``failurePolicy``; operators with ``failurePolicy: Fail``
+                # will see admissions blocked while the cache is
+                # unhealthy — which matches the security intent of
+                # opting into kernel-CVE gating in the first place.
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, body)
+                return
             self._reply(HTTPStatus.OK, b"ok\n", content_type="text/plain")
             return
         self._reply(HTTPStatus.NOT_FOUND, b'{"error":"not found"}\n')
@@ -345,19 +508,27 @@ def serve(
         health_thread = threading.Thread(target=_serve_health, daemon=True, name="cepheus-health")
         health_thread.start()
 
+    node_cache_state = "off"
+    if cfg.node_kernel_cache is not None:
+        snap = cfg.node_kernel_cache.snapshot()
+        node_cache_state = f"on (kernels={sorted(snap.kernel_versions)})"
     logger.info(
-        "admission webhook listening on https://%s:%d (max_severity=%s baseline=%s fail_on_new=%s)",
+        "admission webhook listening on https://%s:%d "
+        "(max_severity=%s baseline=%s fail_on_new=%s node_kernel_cache=%s)",
         bind_addr,
         port,
         cfg.max_severity,
         cfg.baseline_path,
         cfg.fail_on_new,
+        node_cache_state,
     )
     try:
         server.serve_forever()
     finally:
         server.shutdown()
         server.server_close()
+        if cfg.node_kernel_cache is not None:
+            cfg.node_kernel_cache.stop()
 
 
 def load_admission_config(
@@ -367,6 +538,7 @@ def load_admission_config(
     fail_on_new: bool,
     include_kernel_cves: bool,
     fail_open_on_error: bool,
+    node_kernel_cache: NodeKernelCache | None = None,
 ) -> AdmissionConfig:
     """Build + validate an AdmissionConfig at startup.
 
@@ -382,6 +554,7 @@ def load_admission_config(
         include_kernel_cves=include_kernel_cves,
         fail_open_on_error=fail_open_on_error,
         config=CepheusConfig(),
+        node_kernel_cache=node_kernel_cache,
     )
 
     if max_severity is not None and max_severity not in _SEVERITY_RANK:
@@ -389,6 +562,18 @@ def load_admission_config(
 
     if fail_on_new and baseline_path is None:
         raise ValueError("--fail-on-new requires --baseline")
+
+    if node_kernel_cache is not None and not include_kernel_cves:
+        # Configuring the cache without enabling kernel-CVE gating is
+        # almost certainly a mistake — the cache wastes apiserver
+        # round-trips with no effect on admission decisions. Log loud
+        # so the operator notices, but don't fail startup (the
+        # combination is still well-defined, just useless).
+        logger.warning(
+            "node_kernel_cache configured but --include-kernel-cves is OFF — "
+            "the cache will refresh in the background but kernel CVE chains "
+            "will still be dropped from gate decisions"
+        )
 
     if baseline_path is not None:
         cfg.baseline_identities = load_baseline(baseline_path)

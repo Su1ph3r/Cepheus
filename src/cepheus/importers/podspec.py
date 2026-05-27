@@ -29,6 +29,7 @@ from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,
     CredentialInfo,
+    KernelInfo,
     KubernetesInfo,
     MountInfo,
     NamespaceInfo,
@@ -251,11 +252,38 @@ def _detect_sandbox_runtime(spec: dict) -> str | None:
     return None
 
 
+def _parse_kernel_version(version: str) -> tuple[int, int, int]:
+    """Extract (major, minor, patch) ints from a kernel version string.
+
+    Kernel version strings vary widely — ``5.15.0-76-generic``,
+    ``6.1.0-13-amd64``, ``5.15.146.1-microsoft-standard-WSL2``,
+    ``5.10.205-195.804.amzn2.x86_64`` — but they all start with
+    ``<major>.<minor>.<patch>`` followed by some suffix. Anything we
+    can't parse degrades to (0, 0, 0); the matcher's kernel_gte /
+    kernel_lte checks then return a definitive miss (not
+    confidence_if_absent — that path only fires when ``kernel`` is
+    absent entirely), so a malformed string produces a clean "no
+    kernel CVE match" rather than crashing.
+    """
+    head = version.split("-", 1)[0]
+    parts = head.split(".")
+    out: list[int] = []
+    for part in parts[:3]:
+        try:
+            out.append(int(part))
+        except ValueError:
+            out.append(0)
+    while len(out) < 3:
+        out.append(0)
+    return out[0], out[1], out[2]
+
+
 def posture_from_podspec(
     spec: dict[str, Any],
     *,
     namespace: str | None = None,
     pod_name: str | None = None,
+    kernel_version: str | None = None,
 ) -> ContainerPosture:
     """Build a synthetic ContainerPosture from a PodSpec dict.
 
@@ -273,11 +301,18 @@ def posture_from_podspec(
         namespace: Optional Kubernetes namespace (recorded in
             ``KubernetesInfo``; not used by gates).
         pod_name: Optional pod name (recorded; not used by gates).
+        kernel_version: Optional kernel version string sourced from a
+            cluster Node (e.g. ``5.15.0-76-generic``). When supplied,
+            populates ``posture.kernel`` so kernel-CVE techniques
+            become real matches instead of falling back to
+            confidence_if_absent. Used by the admission webhook's
+            node-kernel-lookup feature; omitted from CLI-driven
+            ``cepheus analyze podspec.json`` flows.
 
     Returns:
         A populated ``ContainerPosture`` with the fields the PodSpec
-        knows about. Runtime-only fields (kernel.version,
-        runtime.runc_version, etc.) stay at model defaults so the
+        knows about. Runtime-only fields the PodSpec can't carry
+        (runtime.runc_version, etc.) stay at model defaults so the
         analyzer's ``confidence_if_absent`` logic handles them as
         unknown rather than explicitly absent.
     """
@@ -312,12 +347,35 @@ def posture_from_podspec(
 
     sandbox = _detect_sandbox_runtime(spec)
 
+    # Kernel info: by default an empty KernelInfo (kernel-CVE techniques
+    # fall back to confidence_if_absent), populated when the caller
+    # resolved a Node's kernel version out-of-band.
+    #
+    # ``None`` is the sentinel for "unknown — use defaults". An empty
+    # string is a programming bug at the call site (the caller had a
+    # kernel field and it was blank; that's a Node enumeration bug,
+    # not a request for the default behaviour), and silently treating
+    # it like ``None`` would let a future cache refactor that forgets
+    # to filter empty strings degrade kernel gating without any
+    # signal. Fail loud instead.
+    if kernel_version is None:
+        kernel = KernelInfo()
+    elif not kernel_version:
+        raise ValueError(
+            "kernel_version was an empty string; pass None for 'unknown' or a "
+            "real kernel version. Empty strings usually mean the upstream Node "
+            "lookup returned a Node whose kubelet hasn't reported status yet — "
+            "the cache layer is supposed to filter those out before they reach "
+            "the importer."
+        )
+    else:
+        major, minor, patch = _parse_kernel_version(kernel_version)
+        kernel = KernelInfo(version=kernel_version, major=major, minor=minor, patch=patch)
+
     return ContainerPosture(
         enumeration_version="podspec-importer-0.5.0",
         hostname=pod_name or "",
-        # kernel: defaults to empty KernelInfo — no kernel version
-        # available pre-runtime. Kernel-CVE techniques will gracefully
-        # drop because their version-range prereqs can't match.
+        kernel=kernel,
         capabilities=CapabilityInfo(
             effective=sorted(union_caps),
             bounding=sorted(union_caps),

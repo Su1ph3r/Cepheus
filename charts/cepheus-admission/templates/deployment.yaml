@@ -55,6 +55,10 @@ spec:
             {{- if .Values.gate.includeKernelCves }}
             - --include-kernel-cves
             {{- end }}
+            {{- if .Values.nodeKernelLookup.enabled }}
+            - --node-kernel-lookup
+            - --node-kernel-refresh-seconds={{ .Values.nodeKernelLookup.refreshSeconds }}
+            {{- end }}
             {{- if .Values.failOpen }}
             - --fail-open
             {{- else }}

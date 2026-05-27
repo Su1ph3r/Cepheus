@@ -5,9 +5,41 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "cepheus-admission.labels" . | nindent 4 }}
-# The admission server doesn't currently need K8s API access — it
-# operates entirely on the AdmissionReview payload kube-apiserver
-# hands it. The ServiceAccount exists so future enhancements (Node
-# kernel version lookup, RBAC-based per-namespace policy) can attach
-# narrowly-scoped permissions without redeploying.
-automountServiceAccountToken: false
+# Default: SA token NOT mounted — the admission server operates entirely
+# on the AdmissionReview payload kube-apiserver hands it, so it doesn't
+# need apiserver access. Enabling nodeKernelLookup flips this on because
+# the webhook then needs to read Node objects via the K8s API.
+automountServiceAccountToken: {{ .Values.nodeKernelLookup.enabled }}
+{{- if .Values.nodeKernelLookup.enabled }}
+---
+# Read-only access to cluster Nodes — needed by the node-kernel-lookup
+# feature to source `status.nodeInfo.kernelVersion`. Cluster-scoped
+# because Node is a cluster-scoped resource; the only verb actually
+# exercised by the client is `list` (the cache polls the collection
+# endpoint, not per-name reads), so we grant the minimum.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}-node-reader
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cepheus-admission.fullname" . }}-node-reader
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cepheus-admission.fullname" . }}-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cepheus-admission.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

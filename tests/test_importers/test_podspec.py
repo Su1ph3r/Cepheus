@@ -5,6 +5,7 @@ from __future__ import annotations
 from cepheus.importers.podspec import (
     _ALL_CAPABILITIES,
     _DOCKER_DEFAULT_CAPABILITIES,
+    _parse_kernel_version,
     posture_from_podspec,
 )
 
@@ -304,3 +305,59 @@ def test_minimal_hardened_pod_produces_no_evaluable_criticals():
         f"hardened pod should have zero evaluable criticals; got "
         f"{[c.steps[0].technique.id for c in evaluable_criticals]}"
     )
+
+
+# --- kernel_version kwarg ------------------------------------------
+
+
+def test_kernel_version_omitted_yields_empty_kernel_info():
+    """Default behaviour — caller doesn't have node kernel context."""
+    p = posture_from_podspec({"containers": [{"name": "app"}]})
+    assert p.kernel.version == ""
+    assert p.kernel.major == 0
+    assert p.kernel.minor == 0
+    assert p.kernel.patch == 0
+
+
+def test_kernel_version_populates_kernel_info():
+    """When the admission webhook resolves a Node's kernel, the
+    importer must propagate it into posture.kernel so the matcher's
+    kernel_gte / kernel_lte prereqs have a value to compare against."""
+    p = posture_from_podspec(
+        {"containers": [{"name": "app"}]},
+        kernel_version="5.15.0-76-generic",
+    )
+    assert p.kernel.version == "5.15.0-76-generic"
+    assert p.kernel.major == 5
+    assert p.kernel.minor == 15
+    assert p.kernel.patch == 0
+
+
+def test_parse_kernel_version_handles_realistic_strings():
+    """Spot-check the parser against the kernel-version formats we see
+    in the wild across Ubuntu, Debian, WSL2, Amazon Linux, GKE."""
+    assert _parse_kernel_version("5.15.0-76-generic") == (5, 15, 0)
+    assert _parse_kernel_version("6.1.0-13-amd64") == (6, 1, 0)
+    assert _parse_kernel_version("5.15.146.1-microsoft-standard-WSL2") == (5, 15, 146)
+    assert _parse_kernel_version("5.10.205-195.804.amzn2.x86_64") == (5, 10, 205)
+    assert _parse_kernel_version("6.6.13-gke.1100000") == (6, 6, 13)
+
+
+def test_parse_kernel_version_handles_malformed_strings():
+    """A garbage kernel string degrades to (0, 0, 0) so the matcher's
+    kernel_gte/kernel_lte checks return a definitive miss instead of
+    crashing on a malformed version."""
+    assert _parse_kernel_version("") == (0, 0, 0)
+    assert _parse_kernel_version("not-a-version") == (0, 0, 0)
+    assert _parse_kernel_version("5.x.0") == (5, 0, 0)
+
+
+def test_empty_string_kernel_version_raises():
+    """An empty string is a programming bug at the call site — pass
+    ``None`` for "unknown". Silently treating "" like None would let a
+    future cache-layer refactor that forgets to filter empties
+    silently disable kernel-CVE gating without any signal."""
+    import pytest
+
+    with pytest.raises(ValueError, match="empty string"):
+        posture_from_podspec({"containers": [{"name": "app"}]}, kernel_version="")

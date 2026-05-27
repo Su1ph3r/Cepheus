@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Admission webhook: Node kernel-version lookup.** The webhook can
+  now source kernel versions from cluster Node objects via the K8s
+  API and evaluate each pod against every distinct kernel currently
+  in the cluster — so kernel-CVE chains become real gate inputs
+  instead of being dropped. Enabled by combining
+  `gate.includeKernelCves=true` with `nodeKernelLookup.enabled=true`
+  in the Helm chart. The chart auto-provisions a `ClusterRole`
+  granting `nodes: list` to the webhook ServiceAccount and flips
+  `automountServiceAccountToken` on. Fail-fast at startup when the
+  initial fetch can't reach the apiserver and kernel-CVE gating is
+  requested, so the webhook never silently runs with the gate
+  disabled. `/readyz` returns 503 when the cache is unhealthy so
+  `failurePolicy: Fail` propagates the failure to the apiserver.
+- **`cepheus.server.k8s_client`** — new module. Minimal stdlib K8s
+  API client (`K8sClient`) with in-pod ServiceAccount auto-detection
+  via `K8sClient.in_cluster()`, plus `NodeKernelCache`: a
+  background-refreshing snapshot of cluster kernel versions with
+  atomic snapshot reads, error-preserving refresh semantics, and
+  configurable poll interval. Zero new runtime dependencies — same
+  constraint as the rest of `cepheus.server`.
+- **`cepheus admission-server` flags**: `--node-kernel-lookup` /
+  `--no-node-kernel-lookup` and `--node-kernel-refresh-seconds`.
+- **Helm chart**: `nodeKernelLookup.enabled` and
+  `nodeKernelLookup.refreshSeconds` values; `ClusterRole` +
+  `ClusterRoleBinding` for node read access; deployment passes the
+  new admission-server flags.
+- **`posture_from_podspec(spec, *, kernel_version=...)`** — importer
+  accepts a kernel version kwarg that populates `posture.kernel`
+  (parsed into major/minor/patch). Defaults to empty when omitted
+  so existing CLI-driven flows are unchanged.
+- Tests: `tests/test_server/test_k8s_client.py` (client parsing, auth
+  header, cache refresh semantics, error preservation); additions to
+  `tests/test_server/test_admission.py` and
+  `tests/test_importers/test_podspec.py`.
+
+### Changed
+
+- `docs/ADMISSION.md` — new "Kernel CVE evaluation via Node lookup"
+  section documenting RBAC, failure modes, and heterogeneous-kernel
+  semantics. Per-category coverage table updated to reflect
+  `kernel: ✅ when nodeKernelLookup enabled`.
+
 ## [0.5.1] - 2026-05-27
 
 Drops the prebuilt `cepheus-darwin-amd64` binary from the release matrix.

@@ -1030,7 +1030,29 @@ def admission_server(
             "Include kernel-CVE techniques in the gate decision. Default OFF because "
             "kernel CVEs need a runtime kernel version which PodSpec doesn't carry; "
             "they fall back to confidence_if_absent and false-positive otherwise. "
-            "Turn ON only if you've audited your nodes' kernel posture out-of-band."
+            "Pair with --node-kernel-lookup to source kernel versions from cluster Nodes "
+            "via the K8s API."
+        ),
+    ),
+    node_kernel_lookup: bool = typer.Option(
+        False,
+        "--node-kernel-lookup/--no-node-kernel-lookup",
+        help=(
+            "Resolve cluster Node kernel versions from the K8s API and evaluate each pod "
+            "against every distinct kernel in the cluster. Requires the ServiceAccount to "
+            "have RBAC for `nodes: list` and `automountServiceAccountToken: true`. "
+            "Only effective with --include-kernel-cves."
+        ),
+    ),
+    node_kernel_refresh_seconds: float = typer.Option(
+        60.0,
+        "--node-kernel-refresh-seconds",
+        min=5.0,
+        max=3600.0,
+        help=(
+            "How often the node-kernel cache re-polls the apiserver. Lower values catch "
+            "kernel upgrades faster at the cost of more apiserver traffic; 60s is fine "
+            "for kernel posture, which only changes on node reboot. Floor 5s, ceiling 1h."
         ),
     ),
     fail_open: bool = typer.Option(
@@ -1060,44 +1082,95 @@ def admission_server(
     --max-severity, unreadable baseline) exit 2 at startup.
     """
     from cepheus.server.admission import load_admission_config, serve
-
-    try:
-        cfg = load_admission_config(
-            max_severity=max_severity.value if max_severity else None,
-            baseline_path=baseline,
-            fail_on_new=fail_on_new,
-            include_kernel_cves=include_kernel_cves,
-            fail_open_on_error=fail_open,
-        )
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(2)
-
-    if max_severity is None and not fail_on_new:
-        console.print(
-            "[yellow]Warning: no gate configured (--max-severity / --fail-on-new not set). "
-            "Server will log analysis results but admit every pod.[/yellow]"
-        )
-
-    if not cert_file.exists():
-        console.print(f"[red]Error: --cert-file not found: {cert_file}[/red]")
-        raise typer.Exit(2)
-    if not key_file.exists():
-        console.print(f"[red]Error: --key-file not found: {key_file}[/red]")
-        raise typer.Exit(2)
+    from cepheus.server.k8s_client import K8sAPIError, K8sClient, NodeKernelCache
 
     import logging
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    serve(
-        cfg,
-        bind_addr=bind_addr,
-        port=port,
-        cert_file=cert_file,
-        key_file=key_file,
-        health_port=health_port if health_port > 0 else None,
-    )
+    node_cache: NodeKernelCache | None = None
+    if node_kernel_lookup:
+        try:
+            client = K8sClient.in_cluster()
+        except K8sAPIError as exc:
+            console.print(
+                f"[red]Error: --node-kernel-lookup requested but in-cluster setup failed: {exc}[/red]"
+            )
+            raise typer.Exit(2)
+        try:
+            node_cache = NodeKernelCache(
+                client,
+                refresh_interval_sec=node_kernel_refresh_seconds,
+            )
+        except ValueError as exc:
+            console.print(f"[red]Error: {exc}[/red]")
+            raise typer.Exit(2)
+        # When the operator explicitly opted into kernel-CVE gating
+        # AND node-kernel-lookup, an initial-fetch failure must be
+        # fail-fast: starting in an empty-snapshot state would silently
+        # disable the gate the operator just turned on. Without
+        # --include-kernel-cves the cache is wasted but harmless, so
+        # we keep the soft-start behaviour there.
+        try:
+            node_cache.start(
+                fetch_now=True,
+                require_initial_fetch=include_kernel_cves,
+            )
+        except K8sAPIError as exc:
+            console.print(
+                f"[red]Error: initial node-kernel fetch failed: {exc}\n"
+                "Check that the ServiceAccount has the `nodes: list` RBAC verb, "
+                "that automountServiceAccountToken is enabled, and that the "
+                "apiserver is reachable. Refusing to start with kernel-CVE "
+                "gating silently disabled.[/red]"
+            )
+            node_cache.stop()
+            raise typer.Exit(2)
+
+    # Single try/finally so every error path (ValueError from
+    # load_admission_config, missing cert/key, unexpected exception
+    # from serve()) cleans up the background refresh thread. The
+    # previous duplicated ``if node_cache is not None: node_cache.stop()``
+    # at each early-exit site would have leaked on any exception type
+    # we hadn't enumerated.
+    try:
+        try:
+            cfg = load_admission_config(
+                max_severity=max_severity.value if max_severity else None,
+                baseline_path=baseline,
+                fail_on_new=fail_on_new,
+                include_kernel_cves=include_kernel_cves,
+                fail_open_on_error=fail_open,
+                node_kernel_cache=node_cache,
+            )
+        except ValueError as exc:
+            console.print(f"[red]Error: {exc}[/red]")
+            raise typer.Exit(2)
+
+        if max_severity is None and not fail_on_new:
+            console.print(
+                "[yellow]Warning: no gate configured (--max-severity / --fail-on-new not set). "
+                "Server will log analysis results but admit every pod.[/yellow]"
+            )
+
+        if not cert_file.exists():
+            console.print(f"[red]Error: --cert-file not found: {cert_file}[/red]")
+            raise typer.Exit(2)
+        if not key_file.exists():
+            console.print(f"[red]Error: --key-file not found: {key_file}[/red]")
+            raise typer.Exit(2)
+
+        serve(
+            cfg,
+            bind_addr=bind_addr,
+            port=port,
+            cert_file=cert_file,
+            key_file=key_file,
+            health_port=health_port if health_port > 0 else None,
+        )
+    finally:
+        if node_cache is not None:
+            node_cache.stop()
 
 
 @app.command()

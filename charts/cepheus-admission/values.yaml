@@ -12,6 +12,12 @@ image:
   repository: ghcr.io/su1ph3r/cepheus
   # Pin to a specific tag — :latest is convenient but breaks the
   # "what version is deployed" question in incident response.
+  # This tag MUST point to a published cepheus binary that includes
+  # the chart's currently-rendered admission-server flag surface;
+  # bumping the tag while [Unreleased] flags are wired into the
+  # deployment template would crash the container at start with
+  # "unknown flag" from Typer. Bump at release-cut time, not in
+  # feature branches.
   tag: "0.5.0"
   pullPolicy: IfNotPresent
   # imagePullSecrets: [name: my-pull-secret]
@@ -37,9 +43,27 @@ gate:
 
   # Include kernel-CVE techniques in the gate decision. Default false
   # because kernel CVEs need a runtime kernel version which PodSpec
-  # doesn't carry — they false-positive otherwise. Turn on only if
-  # you've audited your nodes' kernel posture out-of-band.
+  # doesn't carry. Pair with nodeKernelLookup.enabled below to source
+  # kernel versions from cluster Nodes via the K8s API — otherwise the
+  # kernel CVE matchers fall back to confidence_if_absent and produce
+  # no useful signal.
   includeKernelCves: false
+
+# Resolve cluster Node kernel versions from the K8s API and evaluate
+# each pod against every distinct kernel in the cluster. When enabled:
+#   * The chart creates a ClusterRole + ClusterRoleBinding granting
+#     `nodes: list` to the webhook ServiceAccount.
+#   * ServiceAccount tokens are automounted (otherwise off).
+#   * The webhook spawns a background thread that re-polls Nodes every
+#     `refreshSeconds` to keep a low-overhead snapshot. On apiserver
+#     unreachable, the last-known snapshot keeps serving — admission
+#     never blocks on apiserver availability.
+#
+# Only effective with gate.includeKernelCves=true. Without that, the
+# cache refreshes but kernel CVE chains stay dropped from gating.
+nodeKernelLookup:
+  enabled: false
+  refreshSeconds: 60
 
 # Optional ConfigMap source for the baseline. When set, the chart
 # creates a ConfigMap named ${release}-baseline with this content and

@@ -65,12 +65,68 @@ Per-category coverage at admission time:
 | `runtime` | ✅ | PodSpec carries `serviceAccountName`, `automountServiceAccountToken`, `runtimeClassName`, host-namespace flags |
 | `combinatorial` | ✅ | Built from primitives the categories above already cover |
 | `info_disclosure` | ✅ | Same |
-| `kernel` | ❌ (default) | No kernel version in AdmissionReview. Set `gate.includeKernelCves=true` if you've audited node kernels separately. |
+| `kernel` | ✅ when `nodeKernelLookup` enabled | AdmissionReview doesn't carry a kernel version, but the webhook can resolve it per-Node via the K8s API (see [Kernel CVE evaluation](#kernel-cve-evaluation-via-node-lookup) below). Without that, kernel CVEs are dropped from gating because matching against an empty version produces no useful signal. |
 
 For the runtime-only check, run `cepheus verify` against the running
 pod AFTER admission — `kubectl exec`-able primitives like the
 verifier's open-then-close probes confirm what the static admission
 check could only suspect.
+
+## Kernel CVE evaluation via Node lookup
+
+By default the admission webhook can't gate on kernel CVEs because a
+PodSpec doesn't carry a kernel version — the kernel is a property of
+the Node the pod is scheduled onto, not the pod itself. Enabling
+`nodeKernelLookup` flips this on by having the webhook poll the K8s
+API for the kernel version of every Node in the cluster, then
+evaluating each admission against **every distinct kernel currently
+present**. A pod is denied if it produces a gate-violating chain
+under any kernel it could plausibly land on.
+
+```yaml
+gate:
+  includeKernelCves: true     # tells the gate to evaluate kernel CVEs
+nodeKernelLookup:
+  enabled: true               # tells the webhook to source kernel data
+  refreshSeconds: 60          # how often to re-poll the apiserver
+```
+
+When `enabled: true`, the chart automatically:
+
+- Mounts a ServiceAccount token into the webhook pod
+  (`automountServiceAccountToken: true`).
+- Creates a `ClusterRole` granting `nodes: list` and binds it to
+  the webhook ServiceAccount.
+- Passes `--node-kernel-lookup --node-kernel-refresh-seconds=N` to
+  the admission-server process.
+
+### Failure modes
+
+| Condition | Behaviour |
+|---|---|
+| ServiceAccount lacks `nodes: list` RBAC | Initial fetch fails. If `gate.includeKernelCves=true`, the webhook **fails to start** (exit 2) with a clear error pointing at the RBAC. If `gate.includeKernelCves=false`, the cache is opportunistic — webhook starts, kernel CVE chains stay dropped, error appears in `/readyz`. |
+| Apiserver unreachable during a refresh | Last-known kernel snapshot keeps serving. `last_error` updates in the cache; gate decisions continue against the previously-known kernel set. |
+| Cluster has heterogeneous kernels (e.g. mid-rolling-upgrade) | Each distinct kernel produces a separate analyzer run; the gate sees the UNION of all chains. A pod is denied if it would violate the gate under any kernel. |
+| `nodeKernelLookup.enabled=true` but `gate.includeKernelCves=false` | Cache refreshes in the background but the gate ignores its data. A startup warning is logged. Configure both or neither. |
+
+### RBAC details
+
+The chart's `ClusterRole` has the minimum verbs needed:
+
+```yaml
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+```
+
+No `watch` (we poll at a fixed interval, simpler failure model), no
+`get` (the client only reads the collection endpoint), no write
+verbs, no other resources. If your cluster's policy controller
+restricts ClusterRole creation, an admin can create the role
+out-of-band and point the chart at it via a future
+`nodeKernelLookup.existingClusterRoleName` value (not yet
+implemented).
 
 ## Configuration
 
