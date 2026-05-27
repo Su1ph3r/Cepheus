@@ -1,0 +1,74 @@
+# Local gates that mirror the CI workflow at .github/workflows/ci.yml.
+#
+# Setup (one-time, per checkout):
+#   pip install pre-commit
+#   pre-commit install                    # runs the `commit` stage hooks
+#   pre-commit install --hook-type pre-push   # runs the `push` stage hooks
+#
+# Optional dry-run across the tree:
+#   pre-commit run --all-files
+#
+# Why this exists: CI runs ruff check + ruff format --check + pytest +
+# dash -n on every push, and finding out a format-only nit blocked the
+# pipeline AFTER the push is wasteful. These hooks fail the same way
+# CI does, but locally, before the commit (cheap checks) or before the
+# push (test suite).
+#
+# Version pinning rationale: the ruff revision MUST stay in lockstep
+# with .github/workflows/ci.yml's `pip install "ruff==X.Y.Z"`. Mismatched
+# versions reintroduce the exact "CI red on green local" failure mode
+# this config exists to prevent. Bump both files together.
+
+repos:
+  # Mechanical sanity hooks. Catch the things that produce
+  # "why did CI fail on a one-line change" frustration.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Helm chart templates contain Go-template directives which
+        # are not valid YAML on their own — exclude them. The release
+        # pipeline still renders + validates them via `helm template`.
+        exclude: ^charts/cepheus-admission/templates/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  # ruff lint + format — same version CI pins.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff-check
+        args: [--exit-non-zero-on-fix]
+      - id: ruff-format
+        # --check matches CI: report drift, don't silently reformat.
+        # Locally, `ruff format` (without --check) fixes everything;
+        # we want the gate to fail rather than make commits that
+        # incidentally reformat code unrelated to the operator's
+        # intended change.
+        args: [--check]
+
+  # Local pytest hook — runs only on pre-push to keep the per-commit
+  # latency low. Slow tests would punish iterative work; CI still
+  # runs them on every push for the full matrix.
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (pre-push, fast subset)
+        entry: pytest -q --no-header
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        # ``always_run`` ensures the test suite runs even when only
+        # non-Python files were changed — chart edits, docs, and
+        # workflow tweaks can still break pytest indirectly.
+        always_run: true
+
+  # NOTE: the ``dash -n`` POSIX-parse gate for ``enumerator/cepheus-enum.sh``
+  # runs in CI (.github/workflows/ci.yml :: enumerator-shell-lint) but not
+  # locally — Windows hosts rarely have dash installed and a local hook
+  # that's silently skipped on the most common dev OS provides false
+  # confidence. Contributors who change the enumerator should run
+  # ``dash -n enumerator/cepheus-enum.sh`` manually under WSL / Linux.

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-27
+
+Adds the Kubernetes admission webhook's Node kernel-version lookup,
+plus a thorough finalize hardening pass on the surrounding admission
+flow (CA-pinned TLS, projected SA token re-read per request,
+no-redirect handler, env-var URL validation, narrowed exception
+handling, ``/readyz`` cache-health propagation, chain-id-based
+de-duplication). Also adds a ``.pre-commit-config.yaml`` mirroring
+the CI gates so local developers catch ruff issues before push
+instead of after.
+
 ### Added
 
 - **Admission webhook: Node kernel-version lookup.** The webhook can
