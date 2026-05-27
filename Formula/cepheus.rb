@@ -24,7 +24,7 @@
 class Cepheus < Formula
   desc "Container Escape Scenario Modeler — enumerate posture, verify primitives"
   homepage "https://github.com/Su1ph3r/Cepheus"
-  version "0.4.1"
+  version "0.4.2"
   license "MIT"
 
   on_macos do

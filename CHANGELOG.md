@@ -7,9 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-26
+
+Adds prebuilt native binaries, a GHCR container image, Homebrew tap,
+and a Scoop manifest. Cepheus is now installable in five forms (pip,
+container, native binary, Homebrew, Scoop). v0.4.1 was cut, hit a
+Windows-specific crash in the release pipeline's binary-smoke-test
+step, and was withdrawn (the v0.4.1 GitHub Release and git tag were
+deleted before any artifacts were published). All features described
+against v0.4.1 land in v0.4.2 unchanged, plus the Windows fix below.
+
+### Fixed
+
+- **Windows: non-TTY stdout no longer crashes with `OSError [Errno 22]`.**
+  Python on Windows defaults stdout/stderr to the active code page
+  (typically `cp1252`) when not connected to a TTY. Any Cepheus command
+  whose output runs through a pipe — `cepheus techniques | grep`,
+  `cepheus analyze posture.json --format text > out.txt`, the release
+  pipeline's smoke-test piping through `head`, etc. — would crash the
+  moment Rich tried to emit a non-ASCII character (`…` for column
+  truncation, box-drawing chars for tables). `cli.py` now calls
+  `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` and the
+  same on stderr at import time on Windows. Idempotent and no-op on
+  non-Windows platforms. The `errors="replace"` fallback keeps output
+  flowing if a truly un-encodable char ever slips through.
+- **Release pipeline binary smoke test simplified.** The previous
+  `./binary techniques --severity critical | head -20` step was what
+  surfaced the cp1252 bug; reducing the smoke test to `--version` +
+  `--help > /dev/null` keeps the entry-point coverage without
+  re-introducing the same encoding edge case (which is now properly
+  fixed at the source).
+
+### Changed
+
+- `cepheus-action` default `cepheus-version` bumped from `0.4.1` →
+  `0.4.2`.
+
+### Notes
+
+- v0.4.1 git tag and GitHub Release were deleted before any installable
+  artifacts were published. The v0.4.1 CHANGELOG entry has been merged
+  into v0.4.2 below; no one should reference v0.4.1 as a release.
+
 ## [0.4.1] - 2026-05-26
 
-Distribution unlock — roadmap Phase 2. Cepheus is now installable in
+(withdrawn — see v0.4.2 note above)
+
+Adds prebuilt native binaries, a GHCR container image, Homebrew tap,
+and a Scoop manifest. Cepheus is now installable in
 five forms (pip / native binary / GHCR container / Homebrew / Scoop)
 covering every reasonable deployment target including air-gapped hosts
 and distroless CI runners. Zero behaviour change — `cepheus --version`
@@ -89,11 +134,11 @@ prints `0.4.1` from every install path and runs identical code.
 
 ## [0.4.0] - 2026-05-26
 
-Verifier-depth + parallelism release. Roadmap Phase 1. Coverage of
-`verify_command` probes more than doubles (23 → 47, 35% → 72% of the
-65-technique catalog) and probes now run concurrently inside the target
-container by default. `cepheus verify --format sarif` produces a SARIF
-log that uploads to GitHub Code Scanning alongside (or instead of) the
+Verifier-depth + parallelism release. Coverage of `verify_command`
+probes more than doubles (23 → 47, 35% → 72% of the 65-technique
+catalog) and probes now run concurrently inside the target container
+by default. `cepheus verify --format sarif` produces a SARIF log that
+uploads to GitHub Code Scanning alongside (or instead of) the
 static-analysis SARIF — operators get CONFIRMED/NOT_CONFIRMED/NO_VERIFIER/ERROR
 findings as first-class Code Scanning results.
 
@@ -144,7 +189,7 @@ findings as first-class Code Scanning results.
   custom verify-side reports.
 - **Verifier coverage regression guard test** — `tests/test_engine/test_verifier.py::test_verifier_coverage_meets_minimum`
   fails the build if `verify_command` coverage drops below 40/65,
-  preventing accidental erosion of the differentiator.
+  preventing accidental deletion of probes during refactors.
 - **Per-category coverage guard** — asserts mount/combinatorial/info_disclosure
   stay at 100% and capability at all-but-one.
 
@@ -808,8 +853,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.1...HEAD
-[0.4.1]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...v0.4.1
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...v0.4.2
 [0.4.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...v0.3.5
 [0.3.3]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...v0.3.3

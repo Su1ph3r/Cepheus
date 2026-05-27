@@ -193,3 +193,39 @@ def test_no_args_shows_help():
     # Typer no_args_is_help exits with code 0 or 2 depending on version
     assert result.exit_code in (0, 2)
     assert "analyze" in result.output.lower() or "usage" in result.output.lower()
+
+
+def test_windows_stdout_reconfigured_to_utf8(monkeypatch):
+    """Regression guard for v0.4.2 fix: on Windows, importing cepheus.cli
+    must reconfigure stdout/stderr to UTF-8 so non-TTY pipes don't crash
+    with `OSError [Errno 22]` the moment Rich emits a non-ASCII char.
+
+    Simulates the import path on Windows by faking sys.platform and a
+    fresh stream with a tracking reconfigure(). Asserts reconfigure was
+    called with utf-8 + errors=replace.
+    """
+    import importlib
+    import io
+    import sys
+
+    calls: list[dict] = []
+
+    class FakeStream(io.StringIO):
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    fake_out = FakeStream()
+    fake_err = FakeStream()
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "stdout", fake_out)
+    monkeypatch.setattr(sys, "stderr", fake_err)
+
+    # Force a fresh import so the top-level reconfigure block runs again.
+    import cepheus.cli
+
+    importlib.reload(cepheus.cli)
+
+    assert len(calls) == 2, f"expected stdout+stderr reconfigure, got {calls}"
+    for call in calls:
+        assert call["encoding"] == "utf-8"
+        assert call["errors"] == "replace"

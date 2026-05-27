@@ -66,11 +66,11 @@ inputs:
     default: "true"
   cepheus-version:
     description: >-
-      Cepheus version to install (e.g. `0.4.1`). Defaults to the version
+      Cepheus version to install (e.g. `0.4.2`). Defaults to the version
       this action ships alongside — change in lockstep with the action
       tag so consumers get a reproducible install.
     required: false
-    default: "0.4.1"
+    default: "0.4.2"
   runtime:
     description: Container runtime for image-based enumeration (`docker` or `podman`).
     required: false
