@@ -17,7 +17,6 @@ import io
 import json
 import threading
 import time
-from typing import Any
 
 import pytest
 
