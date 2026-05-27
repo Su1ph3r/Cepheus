@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-05-27
+
+Patch release that unblocks PyPI distribution and ships two release-
+pipeline fixes plus the standalone `cepheus-action` GitHub Actions
+repository setup.
+
+### Changed
+
+- **PyPI distribution name renamed from `cepheus` to `cepheus-engine`.**
+  The bare `cepheus` name on PyPI was already taken by an unrelated
+  2018 Cepheid-variable-star analysis package — `twine upload` returns
+  403 regardless of token validity. The Python module import
+  (`import cepheus`), the CLI binary (`cepheus`), the GHCR image
+  (`ghcr.io/su1ph3r/cepheus`), the Homebrew formula, the Scoop
+  manifest, the GitHub Action, and every other identifier remain
+  unchanged. Only the `pip install <NAME>` token changes:
+  `pip install cepheus-engine` going forward.
+- `pyproject.toml` `name` field → `cepheus-engine`.
+- `Dockerfile` wheel glob widened to `cepheus*-py3-none-any.whl` —
+  PEP 427 normalises the project name's hyphen to an underscore in
+  the wheel filename (`cepheus_engine-0.6.1-py3-none-any.whl`), so
+  the glob now matches both the legacy and renamed filenames.
+
+### Fixed
+
+- **`release.yml` workflow_dispatch tag resolution.** The
+  `attach-to-release` and `update-package-manifests` jobs used the
+  pattern
+  ``tag="${GITHUB_REF#refs/tags/}"; [ -z "$tag" ] && tag="$INPUT_TAG"``
+  which silently fails under `workflow_dispatch` because
+  `GITHUB_REF` is `refs/heads/<branch>` (not `refs/tags/<tag>`) and
+  the strip pattern doesn't match — `tag` ends up as the literal
+  `refs/heads/main`, non-empty, so the `INPUT_TAG` fallback never
+  fires. Both jobs now branch on `GITHUB_EVENT_NAME` like the
+  `build` job already does. Push-tag-triggered runs were always
+  fine; only the rarer workflow_dispatch path was broken.
+- **`release.yml` publish-pypi metadata compatibility.** The job
+  had no `actions/setup-python@v5` step, so it ran against the
+  runner's apt-installed system Python with an old `pkginfo`. That
+  `pkginfo` rejected the PEP 639 metadata fields
+  (`License-Expression`, `License-File`) that modern hatchling
+  emits when `pyproject.toml` uses the SPDX string form
+  (`license = "MIT"`). Added a pinned `setup-python@v5` step and an
+  explicit `pip install "twine>=6.0" "pkginfo>=1.12"` so `twine
+  check` understands modern wheel metadata.
+
+### Added
+
+- **Standalone `Su1ph3r/cepheus-action` repository setup.** The
+  GitHub Action that wraps `cepheus ci` now ships in a dedicated
+  repo so consumers can reference it as
+  `uses: Su1ph3r/cepheus-action@v0.6.1` (instead of the subdir-path
+  form), and so it can be listed on the GitHub Actions Marketplace.
+  The action source remains in `cepheus-action/` inside this repo
+  — a release-triggered sync workflow mirrors the directory to the
+  standalone repo on every tag. The action installs Cepheus from
+  PyPI as `cepheus-engine`.
+- `cepheus-action/action.yml`: `cepheus-version` default bumped to
+  `0.6.1`; install line now uses `cepheus-engine`.
+- `cepheus-action/README.md`: `uses:` references updated to
+  `v0.6.1`.
+- `cepheus-action/LICENSE` (MIT, matching Cepheus) and
+  `cepheus-action/CHANGELOG.md` added for the standalone repo.
+- `docs/INSTALL.md` + `README.md`: stale `v0.4.2` references
+  refreshed to `v0.6.1`; `pip install` examples updated to the new
+  distribution name.
+
 ## [0.6.0] - 2026-05-27
 
 Adds the Kubernetes admission webhook's Node kernel-version lookup,

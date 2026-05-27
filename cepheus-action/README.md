@@ -4,16 +4,17 @@ GitHub Action wrapping [Cepheus](https://github.com/Su1ph3r/Cepheus) — a
 container escape scanner. Fails the build on severity or baseline-regression
 gates and uploads SARIF to GitHub Code Scanning.
 
-> **Note**: This directory is the source of truth for the action. At each
-> release of Cepheus we extract these files to the standalone
-> `Su1ph3r/cepheus-action` repo so users can reference it as
-> `Su1ph3r/cepheus-action@v0.4.0`. The action itself is thin — it just
-> installs Cepheus and calls `cepheus ci` — so it rarely needs to change
-> independently.
+> **Note**: This directory is the source of truth for the action. On
+> every Cepheus release a sync workflow mirrors these files to the
+> standalone [`Su1ph3r/cepheus-action`](https://github.com/Su1ph3r/cepheus-action)
+> repo and tags the same version, so consumers can reference it as
+> `Su1ph3r/cepheus-action@vX.Y.Z`. The action is thin — it just
+> installs Cepheus from PyPI and runs `cepheus ci` — so it rarely
+> needs to change independently of the engine.
 >
-> The action ships with `cepheus-version: '0.4.0'` as the default install
-> target so consumers get a reproducible cepheus version on every action
-> invocation. Override with `cepheus-version: <pep440>` if you need a
+> Default `cepheus-version` is set to the release this action ships
+> alongside so installs are reproducible without operators having to
+> pin manually. Override `cepheus-version: <pep440>` if you need a
 > different release.
 
 ## Quick start
@@ -36,16 +37,16 @@ jobs:
         run: docker build -t my-app:${{ github.sha }} .
 
       - name: Cepheus scan
-        uses: Su1ph3r/cepheus-action@v0.4.0
+        uses: Su1ph3r/cepheus-action@v0.6.1
         with:
           image: my-app:${{ github.sha }}
           max-severity: critical
 ```
 
-The action installs Cepheus from PyPI, runs `cepheus ci` against your
-image, writes a SARIF report, and uploads it to GitHub Code Scanning.
-The build fails if any chain is at the `max-severity` threshold or
-higher.
+The action installs Cepheus from PyPI (`pip install cepheus-engine`),
+runs `cepheus ci` against your image, writes a SARIF report, and
+uploads it to GitHub Code Scanning. The build fails if any chain is
+at the `max-severity` threshold or higher.
 
 ## Inputs
 
@@ -58,7 +59,7 @@ higher.
 | `fail-on-new` | no | `false` | Fail if any chain in current isn't in `baseline`. Requires `baseline`. |
 | `output` | no | `cepheus.sarif` | SARIF output file. |
 | `upload-sarif` | no | `true` | Auto-upload to Code Scanning. Requires `security-events: write`. |
-| `cepheus-version` | no | `0.4.0` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. |
+| `cepheus-version` | no | `0.6.1` | Pin Cepheus to a specific version on PyPI. Defaults to the version this action ships alongside so installs are reproducible. The action installs the `cepheus-engine` distribution; the installed CLI is `cepheus`. |
 | `runtime` | no | `docker` | `docker` or `podman`. |
 | `python-version` | no | `3.12` | Python version for Cepheus install. |
 
@@ -99,7 +100,7 @@ treat a corrupt scan as "all clear":
 ### Severity-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.4.0
+- uses: Su1ph3r/cepheus-action@v0.6.1
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -110,7 +111,7 @@ Simple. Block any container that ships a critical chain.
 ### Regression-only gate
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.4.0
+- uses: Su1ph3r/cepheus-action@v0.6.1
   with:
     image: my-app:${{ github.sha }}
     baseline: .github/cepheus-baseline.sarif
@@ -123,7 +124,7 @@ chains, lets existing ones through.
 ### Both
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v0.4.0
+- uses: Su1ph3r/cepheus-action@v0.6.1
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -145,7 +146,7 @@ posture outside CI and reference it in the workflow:
 #   gh api repos/ORG/REPO/contents/.github/prod-posture.json ...
 
 # Step 2 (in CI):
-- uses: Su1ph3r/cepheus-action@v0.4.0
+- uses: Su1ph3r/cepheus-action@v0.6.1
   with:
     posture-file: .github/prod-posture.json
     max-severity: high

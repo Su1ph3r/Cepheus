@@ -48,16 +48,23 @@ RUN apt-get update \
 # Install cepheus from a wheel built in the surrounding workflow.
 # Use BuildKit's COPY with --from=context for the wheel so the image
 # stays platform-agnostic (the wheel is py3-none-any).
-COPY dist/cepheus-*-py3-none-any.whl /tmp/
+#
+# PEP 427 normalises non-alphanumeric characters in the project name
+# to underscores in the wheel filename, so cepheus-engine produces
+# ``cepheus_engine-X.Y.Z-py3-none-any.whl``. The glob below tolerates
+# both the legacy ``cepheus-X.Y.Z-...`` filename (pre-0.6.1 releases)
+# and the post-rename ``cepheus_engine-X.Y.Z-...`` filename so an old
+# wheel built outside CI doesn't fail to copy in.
+COPY dist/cepheus*-py3-none-any.whl /tmp/
 
 # Resolve the wheel path via `ls` first — `pip install /tmp/*.whl[html]`
 # fails because bash interprets `[html]` as a glob character class and
 # never expands the `*`. Resolving the path explicitly into a shell
 # variable lets the `[html]` extras spec attach to the resolved path
 # rather than being part of the glob pattern.
-RUN whl=$(ls /tmp/cepheus-*-py3-none-any.whl | head -n1) \
+RUN whl=$(ls /tmp/cepheus*-py3-none-any.whl | head -n1) \
     && pip install --no-cache-dir "${whl}[html]" \
-    && rm -f /tmp/cepheus-*.whl
+    && rm -f /tmp/cepheus*.whl
 
 # Drop privileges by default. The container runs as a non-root user;
 # the docker socket bind-mount handles its own permission negotiation

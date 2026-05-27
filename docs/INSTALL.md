@@ -21,19 +21,26 @@ differently.
 ## pip
 
 ```sh
-pip install cepheus      # once published to PyPI
-# until then:
-pip install git+https://github.com/Su1ph3r/Cepheus@v0.4.2
-# or grab the wheel from the release page:
-pip install https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-0.4.2-py3-none-any.whl
+pip install cepheus-engine
+# Or pin a specific version:
+pip install cepheus-engine==0.6.1
+# Or install from a git ref:
+pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.1
+# Or grab the wheel from the release page:
+pip install https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/cepheus_engine-0.6.1-py3-none-any.whl
 ```
+
+The PyPI distribution name is `cepheus-engine` (the bare `cepheus`
+name was already taken on PyPI by an unrelated project). The
+installed CLI is still `cepheus` and `import cepheus` still works
+unchanged.
 
 Optional extras:
 
 ```sh
-pip install 'cepheus[html]'         # HTML report generator (jinja2)
-pip install 'cepheus[llm]'          # LLM enrichment via litellm
-pip install 'cepheus[html,llm]'     # both
+pip install 'cepheus-engine[html]'         # HTML report generator (jinja2)
+pip install 'cepheus-engine[llm]'          # LLM enrichment via litellm
+pip install 'cepheus-engine[html,llm]'     # both
 ```
 
 Requires Python 3.11 or newer.
@@ -48,21 +55,21 @@ runtime required. Built with Nuitka, sha256-verified.
 ```sh
 # Linux amd64
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-linux-amd64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/cepheus-linux-amd64
 chmod +x cepheus
 ./cepheus --version
 
 # Linux arm64
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-linux-arm64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/cepheus-linux-arm64
 
 # macOS Apple Silicon (Intel Macs: use Rosetta — `arch -x86_64 ./cepheus ...`)
 curl -L -o cepheus \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-darwin-arm64
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/cepheus-darwin-arm64
 
 # Windows amd64 (PowerShell)
 Invoke-WebRequest `
-  -Uri https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/cepheus-windows-amd64.exe `
+  -Uri https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/cepheus-windows-amd64.exe `
   -OutFile cepheus.exe
 ```
 
@@ -70,7 +77,7 @@ Verify with the published SHA-256 checksums:
 
 ```sh
 curl -L -o SHA256SUMS \
-  https://github.com/Su1ph3r/Cepheus/releases/download/v0.4.2/SHA256SUMS
+  https://github.com/Su1ph3r/Cepheus/releases/download/v0.6.1/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
@@ -86,7 +93,7 @@ release. Tagged `:X.Y.Z`, `:X.Y`, and `:latest`.
 ```sh
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/su1ph3r/cepheus:0.4.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.1 \
   ci nginx:latest --max-severity critical --format sarif --output /dev/stdout
 ```
 
@@ -99,7 +106,7 @@ Without it, `cepheus ci` falls back to posture-file mode only.
 ```sh
 docker run --rm \
   -v "$PWD:/work" -w /work \
-  ghcr.io/su1ph3r/cepheus:0.4.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.1 \
   ci posture.json --max-severity critical --format sarif -o report.sarif
 ```
 
@@ -108,7 +115,7 @@ docker run --rm \
 ```sh
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/su1ph3r/cepheus:0.4.2 \
+  ghcr.io/su1ph3r/cepheus:0.6.1 \
   verify --container-id my-running-container --format sarif --output /dev/stdout
 ```
 
@@ -116,8 +123,8 @@ docker run --rm \
 
 | Tag | Use case |
 |---|---|
-| `ghcr.io/su1ph3r/cepheus:0.4.2` | Pin to an exact version (recommended for CI) |
-| `ghcr.io/su1ph3r/cepheus:0.4` | Track the latest patch in a minor line |
+| `ghcr.io/su1ph3r/cepheus:0.6.1` | Pin to an exact version (recommended for CI) |
+| `ghcr.io/su1ph3r/cepheus:0.6` | Track the latest patch in a minor line |
 | `ghcr.io/su1ph3r/cepheus:latest` | Track the latest stable release (avoid in CI) |
 
 The image runs as a non-root user `cepheus` (uid 1000) by default;
@@ -201,13 +208,13 @@ access:
 
 ```sh
 mkdir cepheus-offline
-pip download --dest cepheus-offline cepheus      # or use the GitHub release wheel
+pip download --dest cepheus-offline cepheus-engine   # or use the GitHub release wheel
 ```
 
 Transfer the directory to the air-gapped host and install:
 
 ```sh
-pip install --no-index --find-links cepheus-offline cepheus
+pip install --no-index --find-links cepheus-offline cepheus-engine
 ```
 
 Or skip Python entirely: download the appropriate native binary from

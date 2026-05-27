@@ -66,11 +66,15 @@ inputs:
     default: "true"
   cepheus-version:
     description: >-
-      Cepheus version to install (e.g. `0.5.0`). Defaults to the version
-      this action ships alongside — change in lockstep with the action
-      tag so consumers get a reproducible install.
+      Cepheus version to install from PyPI (e.g. `0.6.1`). Defaults to
+      the version this action ships alongside — change in lockstep with
+      the action tag so consumers get a reproducible install. Note: the
+      PyPI distribution is published as ``cepheus-engine`` (the bare
+      name ``cepheus`` was already taken on PyPI by an unrelated
+      project); the Python module import, CLI binary, GHCR image, and
+      Homebrew/Scoop names all remain ``cepheus``.
     required: false
-    default: "0.5.0"
+    default: "0.6.1"
   runtime:
     description: Container runtime for image-based enumeration (`docker` or `podman`).
     required: false
@@ -185,7 +189,10 @@ runs:
       run: |
         # INPUT_CEPHEUS_VERSION was validated above; it always has a value
         # (the input default is the version this action ships alongside).
-        pip install "cepheus==${INPUT_CEPHEUS_VERSION}"
+        # PyPI distribution is `cepheus-engine` (the bare `cepheus` name
+        # was taken pre-existing on PyPI); the installed CLI is still
+        # named `cepheus` and `import cepheus` still works.
+        pip install "cepheus-engine==${INPUT_CEPHEUS_VERSION}"
         cepheus --version
 
     - name: Scan
