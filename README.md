@@ -81,6 +81,29 @@ cepheus techniques --severity critical
 See [docs/CI.md](docs/CI.md) for the full CI integration guide, including
 the GitHub Actions workflow that uploads SARIF to Code Scanning.
 
+## GitHub Actions integration
+
+Cepheus ships a dedicated GitHub Action at
+[`Su1ph3r/cepheus-action`](https://github.com/Su1ph3r/cepheus-action)
+for one-line CI integration:
+
+```yaml
+- uses: Su1ph3r/cepheus-action@v0.6.2
+  with:
+    image: my-app:${{ github.sha }}
+    max-severity: critical
+```
+
+The action installs `cepheus-engine` from PyPI, runs `cepheus ci`
+against the image (or a previously-captured posture file), writes a
+SARIF report, and uploads it to GitHub Code Scanning. See the
+[action's README](https://github.com/Su1ph3r/cepheus-action#readme)
+for the full input/output reference and gating patterns.
+
+The action's source lives in this repo under
+[`cepheus-action/`](cepheus-action/); a release-triggered sync workflow
+mirrors it to the standalone repo on every Cepheus release.
+
 ## Technique coverage
 
 65 techniques across 6 categories:

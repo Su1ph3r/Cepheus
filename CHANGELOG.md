@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Standalone `Su1ph3r/cepheus-action` GitHub repository** — the
+  GitHub Action that wraps `cepheus ci` now lives in a dedicated
+  public repo so consumers can pin via the canonical
+  `uses: Su1ph3r/cepheus-action@vX.Y.Z` form (instead of the
+  subdir-path form), and so it can be listed on the GitHub Actions
+  Marketplace.
+- **`.github/workflows/sync-action.yml`** — release-triggered mirror
+  workflow. On every `v*.*.*` tag push to this repo, the workflow
+  copies `cepheus-action/{action.yml, README.md, LICENSE, CHANGELOG.md}`
+  to `Su1ph3r/cepheus-action`, commits, pushes to its `main`, and
+  creates a same-named release + tag on the standalone repo. Cross-
+  repo writes use a fine-grained PAT scoped to the standalone repo
+  only (`Contents: read+write`) — the workflow's own `GITHUB_TOKEN`
+  stays read-only. Idempotent — re-runs on the same tag skip already-
+  committed contents and already-created releases.
+- `README.md` — new "GitHub Actions integration" section pointing
+  consumers at `Su1ph3r/cepheus-action`.
+
 ## [0.6.2] - 2026-05-27
 
 Patch release fixing a `__version__` reporting bug that shipped in

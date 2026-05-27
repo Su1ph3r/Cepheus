@@ -1,0 +1,133 @@
+name: sync-cepheus-action
+
+# Mirror the in-tree cepheus-action/ directory to the standalone
+# Su1ph3r/cepheus-action repo on every release tag, and re-tag the
+# same version there. The standalone repo is the consumer-facing
+# surface (`uses: Su1ph3r/cepheus-action@vX.Y.Z`) and the published
+# entry on the GitHub Actions Marketplace — the Marketplace only
+# lists actions from repos where `action.yml` lives at the root, so
+# the monorepo's subdir cannot be listed directly.
+#
+# Trigger model:
+#   * Push to a v*.*.* tag (the normal release flow) — fires
+#     in parallel with release.yml, but no dependency between them;
+#     the standalone repo is mirrored independent of whether the
+#     PyPI / GHCR pipeline succeeded. That decoupling is intentional:
+#     the standalone repo is a documentation artifact, not a binary
+#     artifact, and shouldn't be blocked on apiserver/PyPI flakes.
+#   * workflow_dispatch — for re-syncing after a sync-only fix
+#     (e.g. an action.yml documentation tweak post-release).
+#
+# Authentication:
+#   * Fine-grained PAT in `secrets.CEPHEUS_ACTION_SYNC_TOKEN`, scoped
+#     to `Su1ph3r/cepheus-action` only with `Contents: read+write`.
+#     No other repos accessible from this token; no other scopes.
+#     The workflow's own GITHUB_TOKEN never writes anywhere.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to mirror (e.g. v0.6.2). Used only on manual dispatch."
+        required: true
+        type: string
+
+# Least-privilege at workflow scope. Cross-repo writes flow through
+# the PAT; the GITHUB_TOKEN stays read-only.
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: mirror cepheus-action/ to standalone repo + re-tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          # Pass workflow_dispatch input via env so the bash script
+          # doesn't eat a script-injection sink if someone runs the
+          # dispatch with a tag value containing shell metacharacters.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          # Validate tag shape on both trigger paths. The push-tag
+          # trigger is already filtered to v*.*.* by `tags:` above,
+          # but workflow_dispatch accepts any input string.
+          case "$tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "::error::Invalid tag '$tag' — must match v<major>.<minor>.<patch>."
+              exit 1
+              ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout monorepo at tag
+        uses: actions/checkout@v4
+        with:
+          # Need only the tag's tree contents; no history.
+          fetch-depth: 1
+
+      - name: Checkout standalone cepheus-action repo
+        uses: actions/checkout@v4
+        with:
+          repository: Su1ph3r/cepheus-action
+          token: ${{ secrets.CEPHEUS_ACTION_SYNC_TOKEN }}
+          path: action-repo
+          fetch-depth: 1
+
+      - name: Mirror cepheus-action/ contents
+        run: |
+          # Wipe the standalone working tree (preserving .git) so any
+          # files removed from cepheus-action/ also disappear from the
+          # mirror. ``-mindepth 1`` skips the directory itself;
+          # ``-not -name '.git'`` keeps the git metadata intact.
+          find action-repo -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+          # ``cp -a`` preserves attributes and copies hidden files
+          # (.gitattributes, .gitignore) if any are added later.
+          cp -a cepheus-action/. action-repo/
+
+      - name: Commit + push (skip on no-op)
+        run: |
+          cd action-repo
+          # Bot identity for the sync commits — matches the convention
+          # the manifest-update job in release.yml already uses.
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to mirror — action contents identical to last sync."
+            exit 0
+          fi
+          # Force-push semantics aren't needed: every release brings a
+          # forward-moving commit, never a history rewrite.
+          git commit -m "Sync from Su1ph3r/Cepheus@${{ steps.tag.outputs.tag }}"
+          git push origin HEAD:main
+
+      - name: Create release + tag on standalone repo (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.CEPHEUS_ACTION_SYNC_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Idempotent: if the release was created out-of-band (manual
+          # bootstrap, or a previous sync run that committed but failed
+          # at the release step), don't fail the re-run.
+          if gh release view "$TAG" --repo Su1ph3r/cepheus-action >/dev/null 2>&1; then
+            echo "Release $TAG already exists on Su1ph3r/cepheus-action; skipping create."
+            exit 0
+          fi
+          # Strip the leading 'v' for the PyPI version string in notes
+          # (PEP 440 versions are bare, the GitHub tag carries the 'v').
+          pypi_version="${TAG#v}"
+          gh release create "$TAG" \
+            --repo Su1ph3r/cepheus-action \
+            --target main \
+            --title "$TAG — Mirror of Cepheus $TAG" \
+            --notes "Mirror of [Cepheus $TAG](https://github.com/Su1ph3r/Cepheus/releases/tag/$TAG). Installs \`cepheus-engine==$pypi_version\` from PyPI. See the [upstream release notes](https://github.com/Su1ph3r/Cepheus/releases/tag/$TAG) for the full change list."
