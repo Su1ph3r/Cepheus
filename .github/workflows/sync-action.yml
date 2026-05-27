@@ -72,7 +72,14 @@ jobs:
       - name: Checkout monorepo at tag
         uses: actions/checkout@v4
         with:
-          # Need only the tag's tree contents; no history.
+          # Explicitly pin to the resolved tag rather than letting
+          # ``actions/checkout`` default to GITHUB_REF. On push-tag
+          # triggers GITHUB_REF is the tag, but on workflow_dispatch
+          # it is the branch the dispatch was launched from — pulling
+          # main's tree instead of the tag the operator asked for is
+          # the kind of silent-different-source bug that's nasty to
+          # notice. Always check out the tree we promised to mirror.
+          ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 1
 
       - name: Checkout standalone cepheus-action repo
