@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-26
+
+Distribution unlock — roadmap Phase 2. Cepheus is now installable in
+five forms (pip / native binary / GHCR container / Homebrew / Scoop)
+covering every reasonable deployment target including air-gapped hosts
+and distroless CI runners. Zero behaviour change — `cepheus --version`
+prints `0.4.1` from every install path and runs identical code.
+
+### Added
+
+- **`src/cepheus/__main__.py`** — `python -m cepheus` now works as a
+  module entry point. Also serves as the Nuitka compilation target so
+  the native-binary builds compile a single concrete file rather than
+  a synthetic shim.
+- **`Dockerfile`** — `python:3.12-slim` base + docker-ce-cli + tini.
+  Image is ~210 MB after slim base + cepheus + docker CLI; runs as
+  non-root `cepheus` user (uid 1000) by default. OCI labels for GHCR
+  package-page rendering.
+- **`.dockerignore`** — keeps the build context to `dist/*.whl` only
+  so the image build doesn't ship the source tree, tests, fixtures,
+  or git history.
+- **`.github/workflows/release.yml` extended** with:
+  - **`binaries` matrix job** — 5 platforms: `ubuntu-latest` (linux
+    amd64), `ubuntu-24.04-arm` (linux arm64), `macos-13` (darwin
+    amd64), `macos-latest` (darwin arm64), `windows-latest` (windows
+    amd64). Uses Nuitka 2.4+ with `--standalone --onefile --lto=yes
+    --enable-plugin=anti-bloat`. Each binary is smoke-tested
+    (`--version` + `techniques --severity critical`) before upload.
+  - **`container` job** — `docker/build-push-action` with QEMU +
+    buildx, multi-arch (linux/amd64 + linux/arm64), pushes to
+    `ghcr.io/su1ph3r/cepheus` with three tags: `:X.Y.Z`, `:X.Y`,
+    `:latest`. Provenance + SBOM attached.
+  - **`attach-to-release` rewritten** to gather sdist + wheel +
+    5 native binaries into one staging directory, sha256sum
+    everything into a `SHA256SUMS` file, then upload all of it to
+    the GitHub Release in one `gh release upload --clobber` call.
+  - **`update-package-manifests` job** — downloads the
+    `SHA256SUMS` from the release, extracts per-platform hashes,
+    rewrites `Formula/cepheus.rb` + `scoop/cepheus.json` with the
+    real values, commits + pushes to main as github-actions[bot].
+    Workflow-token commits don't re-trigger workflows so there's no
+    loop risk.
+- **`Formula/cepheus.rb`** — Homebrew formula. Downloads the
+  per-platform native binary from the GitHub Release rather than a
+  source tarball so `brew install cepheus` is fast. Install:
+  `brew tap su1ph3r/cepheus https://github.com/Su1ph3r/Cepheus && brew install cepheus`.
+- **`scoop/cepheus.json`** — Scoop manifest with `autoupdate` against
+  the GitHub Release SHA256SUMS file. Install:
+  `scoop install https://raw.githubusercontent.com/Su1ph3r/Cepheus/main/scoop/cepheus.json`.
+- **`docs/INSTALL.md`** — consolidates all install paths with copy-
+  pasteable commands, sha256-verification flow, and air-gapped
+  install guide.
+
+### Changed
+
+- README install section rewritten to show all five paths at a glance;
+  full details live in `docs/INSTALL.md`.
+- `cepheus-action`'s default `cepheus-version` bumped from `0.4.0` to
+  `0.4.1` so the action stays version-locked to the cepheus release it
+  ships alongside.
+- Release workflow comment header updated to document the new
+  binaries + container + manifest-update pipeline.
+
+### Notes
+
+- **First-run window for Homebrew + Scoop:** the v0.4.1 release commit
+  ships placeholder sha256 values in `Formula/cepheus.rb` and
+  `scoop/cepheus.json`. The release workflow's `update-package-manifests`
+  job rewrites them with the real hashes ~30 seconds after the binaries
+  finish building and pushes a follow-up commit to main. Users who run
+  `brew install` in that 30-second window will get a sha256 mismatch
+  error — wait for the green check on the follow-up commit before
+  installing the freshly-released version.
+- **GHCR token:** no extra secret needed. The workflow uses
+  `${{ github.token }}` with `packages: write` scope (granted by the
+  workflow's `permissions:` block). The package is created on first
+  push.
+- **PyPI:** still gated behind `SKIP_PYPI` repo variable + missing
+  `PYPI_API_TOKEN`. Unchanged from v0.4.0.
+
 ## [0.4.0] - 2026-05-26
 
 Verifier-depth + parallelism release. Roadmap Phase 1. Coverage of
@@ -728,7 +808,8 @@ of matching every Kubernetes pod or every default-Docker-cap container.
 - Optional LLM enrichment via LiteLLM
 - Posture diff command for before/after comparison
 
-[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Su1ph3r/Cepheus/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.5...v0.4.0
 [0.3.5]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.3...v0.3.5
 [0.3.3]: https://github.com/Su1ph3r/Cepheus/compare/v0.3.2...v0.3.3

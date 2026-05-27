@@ -1,0 +1,8 @@
+# Keep the Docker build context tiny — only ship `dist/*.whl` into it.
+# Everything else (source tree, tests, fixtures, docs, git history) is
+# either redundant once the wheel is built or actively harmful (large
+# binary fixtures, .git).
+
+*
+!dist
+!dist/cepheus-*-py3-none-any.whl

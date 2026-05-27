@@ -8,10 +8,32 @@ Cepheus has two components. A POSIX shell enumerator runs inside a container and
 
 ## Install
 
+Pick the form that fits where you're running Cepheus. Full details in
+[docs/INSTALL.md](docs/INSTALL.md).
+
 ```bash
-git clone https://github.com/su1ph3r/Cepheus.git
-cd Cepheus
-pip install -e .
+# Container (CI-friendly, no Python required)
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/su1ph3r/cepheus:latest ci nginx:latest --max-severity critical
+
+# Single binary (Linux/macOS/Windows, no Python required)
+curl -L -o cepheus \
+  https://github.com/Su1ph3r/Cepheus/releases/latest/download/cepheus-linux-amd64
+chmod +x cepheus && ./cepheus --version
+
+# Homebrew (macOS + Linux)
+brew tap su1ph3r/cepheus https://github.com/Su1ph3r/Cepheus
+brew install cepheus
+
+# Scoop (Windows)
+scoop install https://raw.githubusercontent.com/Su1ph3r/Cepheus/main/scoop/cepheus.json
+
+# pip (existing Python env)
+pip install git+https://github.com/Su1ph3r/Cepheus@v0.4.1
+
+# Source (contributors)
+git clone https://github.com/su1ph3r/Cepheus.git && cd Cepheus
+pip install -e '.[dev,html,llm]'
 ```
 
 ## Usage

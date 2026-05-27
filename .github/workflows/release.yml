@@ -1,15 +1,34 @@
 name: release
 
-# Publishes to PyPI + attaches sdist/wheel to the GitHub Release when a
-# tag matching v*.*.* is pushed. The Release itself is expected to exist
-# (the `gh release create` step at ship time is unchanged); this workflow
-# only ATTACHES wheels and PUBLISHES to PyPI.
+# Drives the full release pipeline when a tag matching v*.*.* is pushed:
+#
+#   build              → sdist + wheel (the canonical Python artifacts)
+#   binaries           → Nuitka-compiled single binaries for 5 platforms
+#                        (linux amd64+arm64, darwin amd64+arm64, windows amd64)
+#   container          → GHCR multi-arch image (linux/amd64 + linux/arm64),
+#                        tagged :X.Y.Z, :X.Y, and :latest
+#   attach-to-release  → uploads every artifact above to the GitHub Release
+#                        (which `gh release create` must have created first)
+#   publish-pypi       → twine upload to PyPI (skipped if SKIP_PYPI=true
+#                        or PYPI_API_TOKEN unset — fails loud in latter)
+#
+# Ordering invariants:
+#   * attach-to-release waits for build + binaries + container so all
+#     artifacts land on the GH Release atomically.
+#   * publish-pypi waits for attach-to-release so PyPI (irreversible —
+#     no overwrites permitted) only publishes after the GH Release
+#     assets are durable. The alternative ordering produces a split-brain
+#     release on partial failure, with no recovery path except a version
+#     bump.
 #
 # Setup before first use:
 #   1. Create a PyPI project + API token (https://pypi.org/manage/account/token/)
 #   2. Add it as a repo secret named PYPI_API_TOKEN at
 #      Settings → Secrets and variables → Actions
-#   3. Tag + push: git tag v0.3.5 && git push origin v0.3.5
+#   3. Tag + push: git tag v0.4.1 && git push origin v0.4.1
+#
+# GHCR (ghcr.io/su1ph3r/cepheus) requires no extra secret — the workflow
+# uses ${{ github.token }} with packages:write scope.
 #
 # Trusted-publishing alternative: if we set up OIDC trusted publishing on
 # PyPI (https://docs.pypi.org/trusted-publishers/) we can drop the token
@@ -23,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (e.g. v0.3.5)"
+        description: "Tag to publish (e.g. v0.4.1)"
         required: true
         type: string
 
@@ -112,9 +131,154 @@ jobs:
           name: dist
           path: dist/*
 
-  attach-to-release:
-    name: attach sdist + wheel to GitHub Release
+  binaries:
+    name: build native binary (${{ matrix.label }})
     needs: build
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-amd64
+            runner: ubuntu-latest
+            asset: cepheus-linux-amd64
+            exe_suffix: ""
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+            asset: cepheus-linux-arm64
+            exe_suffix: ""
+          - label: darwin-amd64
+            runner: macos-13
+            asset: cepheus-darwin-amd64
+            exe_suffix: ""
+          - label: darwin-arm64
+            runner: macos-latest
+            asset: cepheus-darwin-arm64
+            exe_suffix: ""
+          - label: windows-amd64
+            runner: windows-latest
+            asset: cepheus-windows-amd64.exe
+            exe_suffix: ".exe"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build deps
+        # Nuitka >= 2.4 supports onefile mode reliably across the matrix.
+        # patchelf is needed for the Linux onefile bootstrap; setuptools
+        # is needed because Nuitka invokes pip during plugin install.
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install "nuitka>=2.4,<3.0" ordered-set
+          pip install -e .
+
+      - name: Build single-file binary
+        # --standalone bundles the Python runtime; --onefile produces a
+        # single self-extracting executable. anti-bloat strips unused
+        # stdlib modules; lto=yes shaves another ~10% off the binary.
+        # We compile cepheus/__main__.py so `cepheus --help` is the
+        # entry point — same as `python -m cepheus`.
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          python -m nuitka \
+            --standalone \
+            --onefile \
+            --assume-yes-for-downloads \
+            --lto=yes \
+            --enable-plugin=anti-bloat \
+            --include-package=cepheus \
+            --include-package-data=cepheus \
+            --output-filename="${ASSET}" \
+            --remove-output \
+            src/cepheus/__main__.py
+          ls -la "${ASSET}"
+
+      - name: Smoke-test the binary
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          ./"${ASSET}" --version
+          ./"${ASSET}" techniques --severity critical | head -20
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.label }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  container:
+    name: build + push GHCR container (multi-arch)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download wheel
+        uses: actions/download-artifact@v4
+        with: { name: dist, path: dist }
+
+      - uses: docker/setup-qemu-action@v3
+        # QEMU enables cross-arch builds on the amd64 runner. Slower
+        # than native arm64 but avoids a second runner + image-push
+        # coordination.
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          repo=$(echo "${GITHUB_REPOSITORY,,}")  # lowercase per OCI spec
+          major_minor="${VERSION%.*}"            # 0.4.1 → 0.4
+          {
+            echo "repo=${repo}"
+            echo "tags=ghcr.io/${repo}:${VERSION},ghcr.io/${repo}:${major_minor},ghcr.io/${repo}:latest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build + push (multi-arch)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: true
+          sbom: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.build.outputs.version }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+
+  attach-to-release:
+    name: attach all assets to GitHub Release
+    needs: [build, binaries, container]
     runs-on: ubuntu-latest
     # Only this job needs to write to the repo (to attach release assets).
     # Scoped here rather than at the workflow level so build / publish
@@ -124,6 +288,31 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: dist, path: dist }
+
+      # `binary-*` artifact names from the `binaries` matrix. Download
+      # them all into a single staging directory, then sha256sum every
+      # file so the release page shows verifiable checksums.
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: binaries/
+
+      - name: Generate SHA-256 checksums
+        run: |
+          mkdir -p staging
+          cp dist/* staging/
+          cp binaries/* staging/
+          cd staging
+          # POSIX sha256sum on Linux; tied to the canonical "256-bit hex
+          # then two spaces then filename" format that `sha256sum -c`
+          # consumes, so consumers can verify with the standard tool.
+          sha256sum * > SHA256SUMS
+          echo "=== Release assets ==="
+          ls -la
+          echo "=== Checksums ==="
+          cat SHA256SUMS
 
       - name: Attach assets
         env:
@@ -150,7 +339,138 @@ jobs:
           # Idempotent: if assets already exist (because we ran gh release
           # create with them at ship time), --clobber overwrites instead
           # of failing.
-          gh release upload "$tag" dist/* --clobber --repo "${GITHUB_REPOSITORY}"
+          gh release upload "$tag" staging/* --clobber --repo "${GITHUB_REPOSITORY}"
+
+  update-package-manifests:
+    name: update Homebrew formula + Scoop manifest
+    needs: [build, attach-to-release]
+    runs-on: ubuntu-latest
+    # Needs to push a follow-up commit to main with the SHA-256 hashes
+    # the binaries job produced — otherwise the placeholder hashes in
+    # Formula/cepheus.rb and scoop/cepheus.json would make `brew install`
+    # / `scoop install` fail for everyone past this release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          # Use the workflow's GITHUB_TOKEN. This pushes back to the
+          # branch the workflow already has permission on. NB: pushes
+          # from a workflow with the default token do NOT trigger other
+          # workflows (anti-loop protection), so the follow-up commit
+          # won't re-fire this release workflow.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download SHA256SUMS from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          [ -z "$tag" ] && tag="$INPUT_TAG"
+          gh release download "$tag" \
+            --pattern "SHA256SUMS" \
+            --output /tmp/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}"
+          cat /tmp/SHA256SUMS
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Rewrite Formula/cepheus.rb + scoop/cepheus.json
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          # Pull per-asset sha256 from the standard sha256sum-format file.
+          # Export via $GITHUB_ENV so the python heredoc can read them via
+          # os.environ — bash command-substitution-only locals don't survive
+          # the python subprocess boundary.
+          linux_amd64=$(awk '$2 == "cepheus-linux-amd64"          {print $1}' /tmp/SHA256SUMS)
+          linux_arm64=$(awk '$2 == "cepheus-linux-arm64"          {print $1}' /tmp/SHA256SUMS)
+          darwin_amd64=$(awk '$2 == "cepheus-darwin-amd64"        {print $1}' /tmp/SHA256SUMS)
+          darwin_arm64=$(awk '$2 == "cepheus-darwin-arm64"        {print $1}' /tmp/SHA256SUMS)
+          windows_amd64=$(awk '$2 == "cepheus-windows-amd64.exe"  {print $1}' /tmp/SHA256SUMS)
+
+          # Fail loud if any hash is missing — better than silently shipping
+          # a half-rewritten formula.
+          for h in "$linux_amd64" "$linux_arm64" "$darwin_amd64" "$darwin_arm64" "$windows_amd64"; do
+            if [ -z "$h" ]; then
+              echo "::error::Missing sha256 in SHA256SUMS — refusing to rewrite manifests."
+              exit 1
+            fi
+          done
+
+          # Export to the workflow env for the python heredoc.
+          export LINUX_AMD64="$linux_amd64"
+          export LINUX_ARM64="$linux_arm64"
+          export DARWIN_AMD64="$darwin_amd64"
+          export DARWIN_ARM64="$darwin_arm64"
+          export WINDOWS_AMD64="$windows_amd64"
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          version       = os.environ["VERSION"]
+          linux_amd64   = os.environ["LINUX_AMD64"]
+          linux_arm64   = os.environ["LINUX_ARM64"]
+          darwin_amd64  = os.environ["DARWIN_AMD64"]
+          darwin_arm64  = os.environ["DARWIN_ARM64"]
+          windows_amd64 = os.environ["WINDOWS_AMD64"]
+
+          # --- Homebrew Formula ---
+          formula = Path("Formula/cepheus.rb")
+          src = formula.read_text(encoding="utf-8")
+          src = re.sub(r'version "[^"]+"', f'version "{version}"', src, count=1)
+          src = src.replace("REPLACE_WITH_LINUX_AMD64_SHA256",  linux_amd64)
+          src = src.replace("REPLACE_WITH_LINUX_ARM64_SHA256",  linux_arm64)
+          src = src.replace("REPLACE_WITH_DARWIN_AMD64_SHA256", darwin_amd64)
+          src = src.replace("REPLACE_WITH_DARWIN_ARM64_SHA256", darwin_arm64)
+          # Re-release case (no placeholders left): rewrite any 64-hex sha
+          # adjacent to the recognised platform URLs.
+          for arch, sha in [
+              ("linux-amd64",  linux_amd64),
+              ("linux-arm64",  linux_arm64),
+              ("darwin-amd64", darwin_amd64),
+              ("darwin-arm64", darwin_arm64),
+          ]:
+              src = re.sub(
+                  rf'(cepheus-{arch}"\s*\n\s*sha256 ")[a-fA-F0-9]{{64}}"',
+                  rf'\g<1>{sha}"',
+                  src,
+              )
+          formula.write_text(src, encoding="utf-8")
+
+          # --- Scoop manifest ---
+          scoop_path = Path("scoop/cepheus.json")
+          scoop = json.loads(scoop_path.read_text(encoding="utf-8"))
+          scoop["version"] = version
+          scoop["url"] = (
+              f"https://github.com/Su1ph3r/Cepheus/releases/download/v{version}/"
+              f"cepheus-windows-amd64.exe"
+          )
+          scoop["hash"] = windows_amd64
+          scoop_path.write_text(json.dumps(scoop, indent=2) + "\n", encoding="utf-8")
+
+          print(f"Updated Formula + Scoop for v{version}.")
+          PY
+
+      - name: Commit + push manifest updates
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cepheus.rb scoop/cepheus.json
+          if git diff --cached --quiet; then
+            echo "No manifest changes — already up to date for v${VERSION}."
+            exit 0
+          fi
+          git commit -m "chore: update Homebrew + Scoop manifests for v${VERSION}"
+          git push origin HEAD:main
 
   publish-pypi:
     name: publish to PyPI
