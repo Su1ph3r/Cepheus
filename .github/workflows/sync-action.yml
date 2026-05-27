@@ -96,17 +96,19 @@ jobs:
           #   * .git   — repository metadata, must survive.
           #   * .github — standalone-only workflows (e.g. the
           #     self-test that runs the action against a known image
-          #     on every push to the standalone repo). The monorepo
-          #     side intentionally has no .github inside
-          #     cepheus-action/, so preserving the standalone's
-          #     .github doesn't break the "remove deleted files"
-          #     invariant — there's nothing to remove.
+          #     on every push to the standalone repo).
           find action-repo -mindepth 1 -maxdepth 1 \
             -not -name '.git' -not -name '.github' \
             -exec rm -rf {} +
-          # ``cp -a`` preserves attributes and copies hidden files
-          # (.gitattributes, .gitignore) if any are added later.
-          cp -a cepheus-action/. action-repo/
+          # rsync (not cp -a) so we can exclude .github/ from the
+          # source side too. The standalone repo's .github/ is
+          # authoritative for the standalone (test workflow lives
+          # there); if a stale .github/ ever creeps into the
+          # monorepo's cepheus-action/, we don't want to overwrite
+          # the standalone's workflows — that would also require a
+          # PAT with workflows: read+write scope, which we
+          # deliberately don't grant.
+          rsync -a --exclude='.github' cepheus-action/ action-repo/
 
       - name: Commit + push (skip on no-op)
         run: |
