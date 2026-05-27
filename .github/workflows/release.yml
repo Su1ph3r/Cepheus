@@ -324,9 +324,16 @@ jobs:
           # values that contain shell metacharacters / closing quotes.
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          if [ -z "$tag" ]; then
-            tag="$INPUT_TAG"
+          # Branch on the trigger event explicitly. Under workflow_dispatch,
+          # GITHUB_REF is refs/heads/<branch> (not refs/tags/<tag>), so the
+          # ${GITHUB_REF#refs/tags/} strip pattern doesn't match and tag
+          # ends up as the literal "refs/heads/main" — a tag-shape
+          # validation failure downstream. The build job's Capture
+          # metadata step uses this same pattern; mirror it here.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
           fi
           # Defence in depth: validate tag shape before using it. The
           # `tags:` trigger filter already restricts push-driven runs to
@@ -369,8 +376,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          [ -z "$tag" ] && tag="$INPUT_TAG"
+          # Mirror the build job's event-name branch — GITHUB_REF is
+          # refs/heads/<branch> under workflow_dispatch, so a bare strip
+          # leaves the wrong value. See attach-to-release for the same
+          # rationale.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
           gh release download "$tag" \
             --pattern "SHA256SUMS" \
             --output /tmp/SHA256SUMS \
