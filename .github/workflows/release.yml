@@ -506,6 +506,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: dist, path: dist }
 
+      # Without an explicit setup-python step, this job runs against
+      # the runner's system Python (ubuntu-latest's apt-installed
+      # python3) — which ships an old ``pkginfo`` that rejects PEP 639
+      # metadata fields (``License-Expression``, ``License-File``)
+      # that modern hatchling emits when pyproject.toml uses the
+      # SPDX string form ``license = "MIT"``. Pin a known-good Python
+      # so the next twine/pkginfo upgrade lands in a clean install
+      # instead of fighting apt's user-site-packages layout.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Publish via twine
         # Twine is the safest option until trusted publishing is set up
         # — explicit token, clear failure mode. To migrate later: switch
@@ -526,6 +538,12 @@ jobs:
             echo "or set the repository variable SKIP_PYPI=true to disable PyPI publishing for this repo."
             exit 1
           fi
-          python -m pip install --upgrade pip twine
+          # Explicit pkginfo upgrade: twine pulls pkginfo transitively,
+          # but pinning it to a version with PEP 639 awareness (>=1.12)
+          # avoids "Invalid distribution metadata: unrecognized or
+          # malformed field 'license-expression'" failures from
+          # ``twine check`` against modern wheel metadata.
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade "twine>=6.0" "pkginfo>=1.12"
           twine check dist/*
           twine upload dist/*
