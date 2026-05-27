@@ -18,7 +18,7 @@ image:
   # deployment template would crash the container at start with
   # "unknown flag" from Typer. Bump at release-cut time, not in
   # feature branches.
-  tag: "0.6.1"
+  tag: "0.6.2"
   pullPolicy: IfNotPresent
   # imagePullSecrets: [name: my-pull-secret]
   imagePullSecrets: []

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-05-27
+
+Patch release fixing a `__version__` reporting bug that shipped in
+0.6.0 / 0.6.1 and made the CLI + SARIF reports misreport the
+installed Cepheus version.
+
+### Fixed
+
+- **`cepheus --version` and SARIF tool-driver metadata reported the
+  wrong version.** `src/cepheus/__init__.py` hardcoded
+  `__version__ = "0.5.0"`, which was never bumped during the 0.6.0
+  or 0.6.1 cuts. The literal flowed into the CLI's `--version`
+  output (cli.py) and the SARIF tool-driver block
+  (`runs[].tool.driver.version` + `semanticVersion`) in every
+  report Cepheus emits, four call sites in `output/sarif.py`.
+  Operators upgrading to 0.6.0 / 0.6.1 saw their tools still
+  identifying as "0.5.0" — incident-response reproducibility was
+  broken and GitHub Code Scanning attributed findings to the wrong
+  version. Fix: source `__version__` dynamically via
+  `importlib.metadata.version("cepheus-engine")` so the value can
+  never drift from `pyproject.toml`. Falls back to
+  `"0.0.0+unknown"` only in the rare source-checkout-without-
+  installed-dist case.
+- Added `tests/test_version.py` regression test asserting
+  `cepheus.__version__` equals `pyproject.toml`'s declared version
+  whenever the package is installed. CI installs the package via
+  `pip install -e ".[dev,html]"`, so the assertion runs there;
+  source-checkout developers without an editable install see a
+  clean skip rather than a confusing failure.
+
 ## [0.6.1] - 2026-05-27
 
 Patch release that unblocks PyPI distribution and ships two release-

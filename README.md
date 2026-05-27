@@ -29,7 +29,7 @@ brew install cepheus
 scoop install https://raw.githubusercontent.com/Su1ph3r/Cepheus/main/scoop/cepheus.json
 
 # pip (existing Python env)
-pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.1
+pip install git+https://github.com/Su1ph3r/Cepheus@v0.6.2
 
 # Source (contributors)
 git clone https://github.com/su1ph3r/Cepheus.git && cd Cepheus
