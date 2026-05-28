@@ -36,3 +36,6 @@ htmlcov/
 # Environment
 .env
 .env.local
+
+# Session scratch
+.remember/

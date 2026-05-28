@@ -21,6 +21,10 @@ def test_script_exists():
     assert SCRIPT_PATH.exists(), f"Enumerator script not found at {SCRIPT_PATH}"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="NTFS does not track Unix executable bits; checked on POSIX runners in CI.",
+)
 def test_script_is_executable():
     """The enumerator script must be executable."""
     st = os.stat(SCRIPT_PATH)
@@ -92,6 +96,14 @@ def test_script_outputs_json_keys():
 @pytest.fixture(scope="module")
 def enumerator_json():
     """Run the enumerator and parse its stdout as JSON."""
+    # The enumerator assumes a Linux /proc filesystem and POSIX userspace.
+    # Running it under Git-Bash / WSL on Windows leaves probes hanging on
+    # missing /proc paths and busybox-style binaries, producing 30s
+    # subprocess timeouts rather than useful failures. POSIX runners
+    # (Linux/macOS) in CI exercise the script for real; locally on
+    # Windows we skip and rely on the static-content tests above.
+    if os.name == "nt":
+        pytest.skip("Enumerator requires Linux /proc; runs on POSIX CI runners only.")
     result = subprocess.run(
         ["sh", str(SCRIPT_PATH)],
         capture_output=True,

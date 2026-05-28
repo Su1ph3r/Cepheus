@@ -49,6 +49,7 @@ from cepheus.importers.podspec import _parse_kernel_version, posture_from_podspe
 from cepheus.models.posture import KernelInfo
 from cepheus.models.technique import TechniqueCategory
 from cepheus.server.k8s_client import NodeKernelCache
+from cepheus.server.notifiers import AdmissionEvent, NotifierConfig, notify
 
 logger = logging.getLogger("cepheus.admission")
 
@@ -74,6 +75,34 @@ _PODSPEC_EVALUABLE_CATEGORIES = frozenset(
 
 # Severity ordering identical to cli.py — keep in sync.
 _SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+# Per-pod policy label. Lets workload owners opt INTO weaker enforcement
+# without operators having to rewrite the ValidatingWebhookConfiguration's
+# NamespaceSelector for every exception. The cluster admin can still
+# require the absence of this label via OPA / Kyverno; the webhook
+# itself trusts whoever can `kubectl apply` a pod to also set this
+# label honestly (which they can already do for other Pod fields like
+# securityContext).
+_POLICY_LABEL = "cepheus.io/policy"
+_POLICY_SKIP = "skip"
+_POLICY_WARN = "warn"
+_POLICY_ENFORCE = "enforce"
+_VALID_POLICIES = frozenset({_POLICY_SKIP, _POLICY_WARN, _POLICY_ENFORCE})
+
+
+def _pod_policy(metadata: dict) -> str:
+    """Resolve the per-pod policy from labels. Default ``enforce`` —
+    absent label means the existing gate behaviour. Unknown values fall
+    back to ``enforce`` rather than silently weakening the gate; logged
+    by the caller."""
+    labels = metadata.get("labels") or {}
+    raw = labels.get(_POLICY_LABEL)
+    if raw is None:
+        return _POLICY_ENFORCE
+    raw = str(raw).strip().lower()
+    if raw not in _VALID_POLICIES:
+        return _POLICY_ENFORCE
+    return raw
 
 
 @dataclass
@@ -102,6 +131,12 @@ class AdmissionConfig:
     # default), kernel CVE chains are dropped from the gate decision
     # because the PodSpec carries no kernel info.
     node_kernel_cache: NodeKernelCache | None = None
+
+    # Outbound notification config. When the webhook denies a pod (or
+    # admits one in warn mode), an event is dispatched to each enabled
+    # channel. POSTs happen on daemon threads so the admission
+    # decision is never blocked on the notifier.
+    notifier_config: NotifierConfig | None = None
 
 
 def _evaluable_chains(chains: list, include_kernel_cves: bool) -> list:
@@ -219,6 +254,19 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
     if not spec:
         return HTTPStatus.OK, _build_response(uid, allowed=True)
 
+    policy = _pod_policy(metadata)
+    if policy == _POLICY_SKIP:
+        # Operator-sanctioned bypass — skip analysis entirely. Logged so
+        # an auditor can still see WHICH pods opted out.
+        logger.info(
+            "admission SKIP uid=%s ns=%s name=%s (label %s=skip)",
+            uid,
+            metadata.get("namespace", ""),
+            metadata.get("name") or metadata.get("generateName", ""),
+            _POLICY_LABEL,
+        )
+        return HTTPStatus.OK, _build_response(uid, allowed=True)
+
     try:
         # When node-kernel lookup is configured AND the operator has
         # opted into kernel-CVE gating, evaluate the pod against every
@@ -303,21 +351,81 @@ def _handle_admission(body: bytes, cfg: AdmissionConfig) -> tuple[int, dict]:
 
     if allowed:
         logger.info(
-            "admission ALLOW uid=%s ns=%s name=%s chains=%d",
+            "admission ALLOW uid=%s ns=%s name=%s chains=%d policy=%s",
             uid,
             metadata.get("namespace", ""),
             metadata.get("name") or metadata.get("generateName", ""),
             len(all_chains),
+            policy,
         )
-    else:
+        return HTTPStatus.OK, _build_response(uid, allowed=True)
+
+    # Disallowed under current gate config — but warn-mode downgrades
+    # the deny to an admit-with-warning. The reason text still goes
+    # through as a kubectl warning header, so the user sees the would-be
+    # violation immediately but the pod is admitted.
+    ns = metadata.get("namespace", "")
+    pod_name = metadata.get("name") or metadata.get("generateName", "")
+    if policy == _POLICY_WARN:
         logger.warning(
-            "admission DENY uid=%s ns=%s name=%s reason=%s",
+            "admission WARN uid=%s ns=%s name=%s reason=%s (label %s=warn)",
             uid,
-            metadata.get("namespace", ""),
-            metadata.get("name") or metadata.get("generateName", ""),
+            ns,
+            pod_name,
             reason,
+            _POLICY_LABEL,
         )
-    return HTTPStatus.OK, _build_response(uid, allowed=allowed, message=reason)
+        _dispatch_notification(cfg, "WARN", ns, pod_name, reason, uid, len(all_chains))
+        return HTTPStatus.OK, _build_response(
+            uid,
+            allowed=True,
+            message=f"Cepheus (warn mode): {reason}",
+        )
+
+    logger.warning(
+        "admission DENY uid=%s ns=%s name=%s reason=%s",
+        uid,
+        ns,
+        pod_name,
+        reason,
+    )
+    _dispatch_notification(cfg, "DENY", ns, pod_name, reason, uid, len(all_chains))
+    return HTTPStatus.OK, _build_response(uid, allowed=False, message=reason)
+
+
+def _dispatch_notification(
+    cfg: AdmissionConfig,
+    decision: str,
+    namespace: str,
+    pod_name: str,
+    reason: str,
+    uid: str,
+    chain_count: int,
+) -> None:
+    """Send a denial / warning event to configured outbound channels.
+
+    Wrapped in a broad try/except so a notifier bug — bad credentials,
+    DNS failure, malformed URL — never blocks an admission decision.
+    A failed notification is logged at WARNING and dropped; the
+    pod's allow/deny status is unaffected.
+    """
+    if cfg.notifier_config is None or not cfg.notifier_config.any_enabled:
+        return
+    try:
+        notify(
+            AdmissionEvent(
+                decision=decision,
+                namespace=namespace,
+                pod_name=pod_name,
+                reason=reason,
+                uid=uid,
+                chain_count=chain_count,
+            ),
+            cfg.notifier_config,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Notifier dispatch must never propagate — logged and swallowed.
+        logger.warning("notifier dispatch failed: %s: %s", type(exc).__name__, exc)
 
 
 def _cache_unhealthy_reason(cfg: AdmissionConfig) -> str | None:
@@ -489,6 +597,7 @@ def serve(
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
 
     health_thread: threading.Thread | None = None
+    health_server: ThreadingHTTPServer | None = None
     if health_port is not None:
         health_server = ThreadingHTTPServer((bind_addr, health_port), AdmissionHandler)
         health_server.cepheus_config = cfg  # type: ignore[attr-defined]
@@ -520,6 +629,15 @@ def serve(
     finally:
         server.shutdown()
         server.server_close()
+        if health_server is not None:
+            # shutdown() unblocks the daemon thread's serve_forever loop;
+            # server_close() releases the listening socket so the health
+            # port is freed on graceful shutdown rather than lingering
+            # bound until the process actually exits.
+            health_server.shutdown()
+            health_server.server_close()
+            if health_thread is not None:
+                health_thread.join(timeout=5.0)
         if cfg.node_kernel_cache is not None:
             cfg.node_kernel_cache.stop()
 
@@ -532,6 +650,7 @@ def load_admission_config(
     include_kernel_cves: bool,
     fail_open_on_error: bool,
     node_kernel_cache: NodeKernelCache | None = None,
+    notifier_config: NotifierConfig | None = None,
 ) -> AdmissionConfig:
     """Build + validate an AdmissionConfig at startup.
 
@@ -548,6 +667,7 @@ def load_admission_config(
         fail_open_on_error=fail_open_on_error,
         config=CepheusConfig(),
         node_kernel_cache=node_kernel_cache,
+        notifier_config=notifier_config,
     )
 
     if max_severity is not None and max_severity not in _SEVERITY_RANK:

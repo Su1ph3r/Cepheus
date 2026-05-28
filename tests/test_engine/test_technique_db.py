@@ -1,5 +1,9 @@
 """Tests for the technique database."""
 
+import threading
+import time
+
+from cepheus.engine import technique_db
 from cepheus.engine.technique_db import get_all_techniques, get_technique_by_id
 from cepheus.engine.poc_templates import POC_TEMPLATES
 
@@ -7,6 +11,41 @@ from cepheus.engine.poc_templates import POC_TEMPLATES
 def test_technique_count():
     """Database should have exactly 65 techniques."""
     assert len(get_all_techniques()) == 65
+
+
+def test_concurrent_cold_cache_builds_singleton_once(monkeypatch):
+    """Double-checked-locking guard: under concurrent cold-cache access
+    (the threaded admission server / fleet ThreadPoolExecutor both call
+    get_all_techniques()) the singleton must be built exactly once, not
+    once per racing thread."""
+    real_build = technique_db._build_techniques
+    calls: list[int] = []
+    calls_lock = threading.Lock()
+
+    def counting_build() -> list:
+        with calls_lock:
+            calls.append(1)
+        time.sleep(0.02)  # widen the race window so an unlocked build would double-fire
+        return real_build()
+
+    monkeypatch.setattr(technique_db, "_TECHNIQUES", None)
+    monkeypatch.setattr(technique_db, "_build_techniques", counting_build)
+
+    results: list[list] = []
+    barrier = threading.Barrier(16)
+
+    def worker() -> None:
+        barrier.wait()
+        results.append(get_all_techniques())
+
+    threads = [threading.Thread(target=worker) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1, f"_build_techniques ran {len(calls)} times under contention, expected 1"
+    assert all(len(r) == 65 for r in results)
 
 
 def test_no_duplicate_ids():

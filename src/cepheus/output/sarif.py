@@ -68,6 +68,15 @@ def _technique_to_rule(technique: Any) -> dict[str, Any]:
         rule["properties"]["cve"] = technique.cve
     if technique.mitre_attack:
         rule["properties"]["mitre-attack"] = technique.mitre_attack
+    # Compliance crosswalk — only emitted when populated so SARIF
+    # consumers can rely on "key absent" meaning "not yet mapped"
+    # rather than seeing every rule annotated with empty arrays.
+    if technique.cis_kubernetes_benchmark:
+        rule["properties"]["cis-kubernetes-benchmark"] = list(technique.cis_kubernetes_benchmark)
+    if technique.nist_800_190:
+        rule["properties"]["nist-800-190"] = list(technique.nist_800_190)
+    if technique.pci_dss:
+        rule["properties"]["pci-dss"] = list(technique.pci_dss)
     return rule
 
 

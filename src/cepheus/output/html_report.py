@@ -148,6 +148,23 @@ _HTML_TEMPLATE = """\
 </table>
 {% endif %}
 
+{% if compliance %}
+<h2>Compliance Mapping</h2>
+<table>
+  <thead>
+    <tr><th>Framework</th><th>Control IDs</th></tr>
+  </thead>
+  <tbody>
+    {% for c in compliance %}
+    <tr>
+      <td>{{ c.framework }}</td>
+      <td>{{ c.controls }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 {% if llm_analysis %}
 <h2>LLM Analysis</h2>
 <div class="llm-analysis">{{ llm_analysis }}</div>
@@ -167,6 +184,13 @@ def _prepare_context(result: AnalysisResult) -> dict[str, Any]:
     """Build the template context dict from an AnalysisResult."""
     chains = []
     mitre_map: dict[str, list[str]] = {}
+    # Aggregate compliance-crosswalk IDs across every matched technique,
+    # deduped per framework. Insertion order fixes the table row order.
+    compliance_ids: dict[str, set[str]] = {
+        "CIS Kubernetes Benchmark": set(),
+        "NIST SP 800-190": set(),
+        "PCI DSS": set(),
+    }
 
     for chain in result.chains:
         steps = []
@@ -183,6 +207,9 @@ def _prepare_context(result: AnalysisResult) -> dict[str, Any]:
                 mitre_map.setdefault(mid, [])
                 if step.technique.name not in mitre_map[mid]:
                     mitre_map[mid].append(step.technique.name)
+            compliance_ids["CIS Kubernetes Benchmark"].update(step.technique.cis_kubernetes_benchmark)
+            compliance_ids["NIST SP 800-190"].update(step.technique.nist_800_190)
+            compliance_ids["PCI DSS"].update(step.technique.pci_dss)
 
         chains.append(
             {
@@ -210,6 +237,10 @@ def _prepare_context(result: AnalysisResult) -> dict[str, Any]:
 
     mitre_ids = [{"id": mid, "techniques": ", ".join(names)} for mid, names in sorted(mitre_map.items())]
 
+    compliance = [
+        {"framework": framework, "controls": ", ".join(sorted(ids))} for framework, ids in compliance_ids.items() if ids
+    ]
+
     return {
         "hostname": result.posture.hostname or "unknown",
         "kernel_version": result.posture.kernel.version or "unknown",
@@ -223,6 +254,7 @@ def _prepare_context(result: AnalysisResult) -> dict[str, Any]:
         "chains": chains,
         "remediations": remediations,
         "mitre_ids": mitre_ids,
+        "compliance": compliance,
         "llm_analysis": result.llm_analysis or "",
     }
 
@@ -251,5 +283,8 @@ def write_html(result: AnalysisResult, path: str | Path) -> Path:
     """Write analysis result as a self-contained HTML file."""
     path = Path(path)
     html = generate_html(result)
-    path.write_text(html)
+    # Explicit utf-8: Windows `Path.write_text()` defaults to the locale
+    # ANSI codepage (cp1252 in en-US), which cannot encode the &mdash;,
+    # &rarr;, and similar entities Jinja emits, producing UnicodeEncodeError.
+    path.write_text(html, encoding="utf-8")
     return path

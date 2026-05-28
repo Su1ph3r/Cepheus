@@ -498,6 +498,84 @@ def test_readyz_healthy_when_kernel_cves_disabled():
     assert _cache_unhealthy_reason(cfg) is None
 
 
+# --- per-pod policy label -------------------------------------------
+
+
+def _admission_review_with_labels(
+    uid: str,
+    pod_spec: dict,
+    labels: dict,
+    *,
+    namespace: str = "default",
+    name: str = "test-pod",
+) -> bytes:
+    body = json.loads(_admission_review(uid, pod_spec, namespace=namespace, name=name))
+    body["request"]["object"]["metadata"]["labels"] = labels
+    return json.dumps(body).encode("utf-8")
+
+
+def test_policy_skip_label_bypasses_analysis():
+    """A pod labeled `cepheus.io/policy=skip` must be admitted even if
+    the underlying gate would otherwise deny."""
+    cfg = AdmissionConfig(max_severity="critical")
+    body = _admission_review_with_labels("uid-skip", _privileged_hostpath_spec(), {"cepheus.io/policy": "skip"})
+    status, payload = _handle_admission(body, cfg)
+    assert status == HTTPStatus.OK
+    assert payload["response"]["allowed"] is True
+    # No warning, no status — true silent allow. Operators who want
+    # the bypass surfaced should rely on the audit log line, not the
+    # admission response.
+    assert "status" not in payload["response"]
+    assert "warnings" not in payload["response"]
+
+
+def test_policy_warn_label_downgrades_deny_to_warning():
+    """A pod labeled `cepheus.io/policy=warn` that WOULD be denied is
+    admitted with the deny reason surfaced as an admission warning."""
+    cfg = AdmissionConfig(max_severity="critical")
+    body = _admission_review_with_labels("uid-warn", _privileged_hostpath_spec(), {"cepheus.io/policy": "warn"})
+    status, payload = _handle_admission(body, cfg)
+    assert status == HTTPStatus.OK
+    assert payload["response"]["allowed"] is True
+    warnings = payload["response"].get("warnings") or []
+    assert len(warnings) == 1
+    assert "warn mode" in warnings[0].lower()
+    assert "Cepheus admission gate" in warnings[0]
+
+
+def test_policy_warn_label_does_not_warn_on_clean_pod():
+    """`warn` only fires when the underlying gate would have denied —
+    a clean pod under warn-mode is admitted with no warnings."""
+    cfg = AdmissionConfig(max_severity="critical")
+    body = _admission_review_with_labels("uid-warn-clean", _hardened_spec(), {"cepheus.io/policy": "warn"})
+    status, payload = _handle_admission(body, cfg)
+    assert status == HTTPStatus.OK
+    assert payload["response"]["allowed"] is True
+    assert "warnings" not in payload["response"]
+
+
+def test_policy_enforce_label_is_default_behaviour():
+    """Explicit `enforce` matches the unlabelled default — privileged
+    pod is denied under a `critical` severity gate."""
+    cfg = AdmissionConfig(max_severity="critical")
+    body = _admission_review_with_labels("uid-enforce", _privileged_hostpath_spec(), {"cepheus.io/policy": "enforce"})
+    status, payload = _handle_admission(body, cfg)
+    assert status == HTTPStatus.OK
+    assert payload["response"]["allowed"] is False
+
+
+def test_policy_unknown_value_falls_back_to_enforce():
+    """An unrecognised value must NOT silently weaken the gate — it
+    falls back to the strictest mode (enforce)."""
+    cfg = AdmissionConfig(max_severity="critical")
+    body = _admission_review_with_labels(
+        "uid-bogus", _privileged_hostpath_spec(), {"cepheus.io/policy": "definitely-not-valid"}
+    )
+    status, payload = _handle_admission(body, cfg)
+    assert status == HTTPStatus.OK
+    assert payload["response"]["allowed"] is False
+
+
 def test_load_admission_config_with_baseline(tmp_path):
     """A real baseline file should load cleanly at startup."""
     baseline = tmp_path / "baseline.json"

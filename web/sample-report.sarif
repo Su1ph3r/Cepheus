@@ -1,0 +1,1659 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Cepheus",
+          "fullName": "Cepheus \u2014 Container Escape Scenario Modeler",
+          "version": "0.6.3",
+          "semanticVersion": "0.6.3",
+          "informationUri": "https://github.com/Su1ph3r/Cepheus",
+          "organization": "Su1ph3r",
+          "rules": [
+            {
+              "id": "env_secret_leak",
+              "name": "SecretsInEnvironmentVariables",
+              "shortDescription": {
+                "text": "Secrets in environment variables"
+              },
+              "fullDescription": {
+                "text": "Sensitive credentials found in environment variables, accessible to any process in the container."
+              },
+              "helpUri": "https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html",
+              "help": {
+                "text": "Use secrets management (Vault, K8s secrets), not env vars",
+                "markdown": "**Secrets in environment variables** (medium)\n\nSensitive credentials found in environment variables, accessible to any process in the container.\n**MITRE ATT&CK:** T1552, T1552.001\n\n**Remediation:** Use secrets management (Vault, K8s secrets), not env vars\n\n**References:**\n- https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "info_disclosure"
+                ],
+                "security-severity": "5.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1552",
+                  "T1552.001"
+                ]
+              }
+            },
+            {
+              "id": "cap_dac_read_search",
+              "name": "ReadArbitraryHostFiles",
+              "shortDescription": {
+                "text": "Read arbitrary host files"
+              },
+              "fullDescription": {
+                "text": "CAP_DAC_READ_SEARCH bypasses file read permission checks and directory read/execute checks, allowing access to any file."
+              },
+              "helpUri": "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+              "help": {
+                "text": "--cap-drop=DAC_READ_SEARCH",
+                "markdown": "**Read arbitrary host files** (high)\n\nCAP_DAC_READ_SEARCH bypasses file read permission checks and directory read/execute checks, allowing access to any file.\n**MITRE ATT&CK:** T1005, T1611\n\n**Remediation:** --cap-drop=DAC_READ_SEARCH\n\n**References:**\n- https://man7.org/linux/man-pages/man7/capabilities.7.html"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1005",
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "k8s_configmap_secrets",
+              "name": "K8sSecretsMountedAsVolumes",
+              "shortDescription": {
+                "text": "K8s secrets mounted as volumes"
+              },
+              "fullDescription": {
+                "text": "Kubernetes secrets and configmaps mounted in the pod can be read by the service account token via the API server."
+              },
+              "helpUri": "https://kubernetes.io/docs/concepts/configuration/secret/",
+              "help": {
+                "text": "Least-privilege RBAC, encrypt secrets at rest",
+                "markdown": "**K8s secrets mounted as volumes** (medium)\n\nKubernetes secrets and configmaps mounted in the pod can be read by the service account token via the API server.\n**MITRE ATT&CK:** T1552.007\n\n**Remediation:** Least-privilege RBAC, encrypt secrets at rest\n\n**References:**\n- https://kubernetes.io/docs/concepts/configuration/secret/"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "info_disclosure"
+                ],
+                "security-severity": "5.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1552.007"
+                ]
+              }
+            },
+            {
+              "id": "k8s_service_account",
+              "name": "K8sSATokenPrivilegeEscalation",
+              "shortDescription": {
+                "text": "K8s SA token privilege escalation"
+              },
+              "fullDescription": {
+                "text": "Kubernetes service account token is mounted and can be used to query the API server for secrets, pods, and more."
+              },
+              "helpUri": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/",
+              "help": {
+                "text": "automountServiceAccountToken: false",
+                "markdown": "**K8s SA token privilege escalation** (high)\n\nKubernetes service account token is mounted and can be used to query the API server for secrets, pods, and more.\n**MITRE ATT&CK:** T1078\n\n**Remediation:** automountServiceAccountToken: false\n\n**References:**\n- https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "runtime"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1078"
+                ]
+              }
+            },
+            {
+              "id": "cap_dac_override",
+              "name": "WriteArbitraryHostFiles",
+              "shortDescription": {
+                "text": "Write arbitrary host files"
+              },
+              "fullDescription": {
+                "text": "CAP_DAC_OVERRIDE bypasses file write permission checks, enabling writes to any host file accessible from the mount namespace. Note: CAP_DAC_OVERRIDE is part of the Docker default capability set; it is only an escape primitive when the container can already see host files (privileged, hostPath mount, or shared mount namespace)."
+              },
+              "helpUri": "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+              "help": {
+                "text": "--cap-drop=DAC_OVERRIDE and avoid privileged/hostPath mounts",
+                "markdown": "**Write arbitrary host files** (high)\n\nCAP_DAC_OVERRIDE bypasses file write permission checks, enabling writes to any host file accessible from the mount namespace. Note: CAP_DAC_OVERRIDE is part of the Docker default capability set; it is only an escape primitive when the container can already see host files (privileged, hostPath mount, or shared mount namespace).\n**MITRE ATT&CK:** T1565, T1611\n\n**Remediation:** --cap-drop=DAC_OVERRIDE and avoid privileged/hostPath mounts\n\n**References:**\n- https://man7.org/linux/man-pages/man7/capabilities.7.html\n- https://docs.docker.com/engine/security/#linux-kernel-capabilities"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1565",
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "tmpfs_shm_cross_container",
+              "name": "Shared/dev/shmCross-containerDataExfil",
+              "shortDescription": {
+                "text": "Shared /dev/shm cross-container data exfil"
+              },
+              "fullDescription": {
+                "text": "Writable /dev/shm shared between containers on the same host allows cross-container data exchange and exfiltration. Note: every container has a writable /dev/shm by default \u2014 this technique only represents an actual exposure when the IPC namespace is shared with the host (hostIPC) or with another pod via an explicit shared emptyDir volume."
+              },
+              "helpUri": "https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts",
+              "help": {
+                "text": "Use --ipc=private, restrict /dev/shm size",
+                "markdown": "**Shared /dev/shm cross-container data exfil** (medium)\n\nWritable /dev/shm shared between containers on the same host allows cross-container data exchange and exfiltration. Note: every container has a writable /dev/shm by default \u2014 this technique only represents an actual exposure when the IPC namespace is shared with the host (hostIPC) or with another pod via an explicit shared emptyDir volume.\n**MITRE ATT&CK:** T1005, T1080\n\n**Remediation:** Use --ipc=private, restrict /dev/shm size\n\n**References:**\n- https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "mount"
+                ],
+                "security-severity": "5.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1005",
+                  "T1080"
+                ]
+              }
+            },
+            {
+              "id": "cap_net_admin",
+              "name": "NetworkNamespaceManipulation",
+              "shortDescription": {
+                "text": "Network namespace manipulation"
+              },
+              "fullDescription": {
+                "text": "CAP_NET_ADMIN allows network interface configuration, routing table modification, and ARP spoofing within the network namespace."
+              },
+              "helpUri": "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+              "help": {
+                "text": "--cap-drop=NET_ADMIN",
+                "markdown": "**Network namespace manipulation** (medium)\n\nCAP_NET_ADMIN allows network interface configuration, routing table modification, and ARP spoofing within the network namespace.\n**MITRE ATT&CK:** T1557\n\n**Remediation:** --cap-drop=NET_ADMIN\n\n**References:**\n- https://man7.org/linux/man-pages/man7/capabilities.7.html"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "5.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1557"
+                ]
+              }
+            },
+            {
+              "id": "cap_sys_ptrace",
+              "name": "PtraceHostProcesses",
+              "shortDescription": {
+                "text": "Ptrace host processes"
+              },
+              "fullDescription": {
+                "text": "With CAP_SYS_PTRACE and a shared PID namespace, attach to host processes and inject code for escape."
+              },
+              "helpUri": "https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts",
+              "help": {
+                "text": "--cap-drop=SYS_PTRACE --pid=container",
+                "markdown": "**Ptrace host processes** (high)\n\nWith CAP_SYS_PTRACE and a shared PID namespace, attach to host processes and inject code for escape.\n**MITRE ATT&CK:** T1055, T1611\n\n**Remediation:** --cap-drop=SYS_PTRACE --pid=container\n\n**References:**\n- https://0xn3va.gitbook.io/cheat-sheets/container/escaping/sensitive-mounts"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1055",
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "cap_sys_admin_mount",
+              "name": "MountHostFilesystemViaCAP_SYS_ADMIN",
+              "shortDescription": {
+                "text": "Mount host filesystem via CAP_SYS_ADMIN"
+              },
+              "fullDescription": {
+                "text": "With CAP_SYS_ADMIN the container can mount the host's block device and gain full read/write access to the host filesystem."
+              },
+              "helpUri": "https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/",
+              "help": {
+                "text": "--cap-drop=ALL --cap-add=<needed>",
+                "markdown": "**Mount host filesystem via CAP_SYS_ADMIN** (critical)\n\nWith CAP_SYS_ADMIN the container can mount the host's block device and gain full read/write access to the host filesystem.\n**MITRE ATT&CK:** T1611\n\n**Remediation:** --cap-drop=ALL --cap-add=<needed>\n\n**References:**\n- https://blog.trailofbits.com/2019/07/19/understanding-docker-container-escapes/"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "cap_sys_admin_bpf",
+              "name": "EBPF-basedEscape",
+              "shortDescription": {
+                "text": "eBPF-based escape"
+              },
+              "fullDescription": {
+                "text": "Use CAP_SYS_ADMIN to load eBPF programs that can read/write arbitrary kernel memory, enabling privilege escalation."
+              },
+              "helpUri": "https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story",
+              "help": {
+                "text": "Drop CAP_SYS_ADMIN and CAP_BPF",
+                "markdown": "**eBPF-based escape** (critical)\n\nUse CAP_SYS_ADMIN to load eBPF programs that can read/write arbitrary kernel memory, enabling privilege escalation.\n**MITRE ATT&CK:** T1611, T1068\n\n**Remediation:** Drop CAP_SYS_ADMIN and CAP_BPF\n\n**References:**\n- https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611",
+                  "T1068"
+                ]
+              }
+            },
+            {
+              "id": "ebpf_probe_write_user",
+              "name": "Bpf_probe_write_userKernelManipulation",
+              "shortDescription": {
+                "text": "bpf_probe_write_user kernel manipulation"
+              },
+              "fullDescription": {
+                "text": "With CAP_BPF or CAP_SYS_ADMIN, the bpf_probe_write_user helper can write to user-space memory of any process, enabling arbitrary code execution on the host."
+              },
+              "helpUri": "https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story",
+              "help": {
+                "text": "Drop CAP_SYS_ADMIN and CAP_BPF, enable seccomp",
+                "markdown": "**bpf_probe_write_user kernel manipulation** (critical)\n\nWith CAP_BPF or CAP_SYS_ADMIN, the bpf_probe_write_user helper can write to user-space memory of any process, enabling arbitrary code execution on the host.\n**MITRE ATT&CK:** T1611, T1068\n\n**Remediation:** Drop CAP_SYS_ADMIN and CAP_BPF, enable seccomp\n\n**References:**\n- https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611",
+                  "T1068"
+                ]
+              }
+            },
+            {
+              "id": "procfs_core_pattern",
+              "name": "WriteTo/proc/sys/kernel/core_pattern",
+              "shortDescription": {
+                "text": "Write to /proc/sys/kernel/core_pattern"
+              },
+              "fullDescription": {
+                "text": "If /proc/sys/kernel/core_pattern is writable AND the container has CAP_SYS_ADMIN, an attacker can set it to a pipe command that executes on the host when a core dump is triggered. Note: DAC permission alone is insufficient \u2014 kernel rejects writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even when the procfs mount appears writable to the container."
+              },
+              "helpUri": "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+              "help": {
+                "text": "Mount /proc read-only or use seccomp",
+                "markdown": "**Write to /proc/sys/kernel/core_pattern** (critical)\n\nIf /proc/sys/kernel/core_pattern is writable AND the container has CAP_SYS_ADMIN, an attacker can set it to a pipe command that executes on the host when a core dump is triggered. Note: DAC permission alone is insufficient \u2014 kernel rejects writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even when the procfs mount appears writable to the container.\n**MITRE ATT&CK:** T1611\n\n**Remediation:** Mount /proc read-only or use seccomp\n\n**References:**\n- https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "mount"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "k8s_node_proxy",
+              "name": "KubeletNodeProxyAbuse",
+              "shortDescription": {
+                "text": "Kubelet node proxy abuse"
+              },
+              "fullDescription": {
+                "text": "Abuse kubelet proxy endpoint to forward traffic to other pods and services on the node."
+              },
+              "helpUri": "https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/",
+              "help": {
+                "text": "Restrict kubelet proxy access via RBAC",
+                "markdown": "**Kubelet node proxy abuse** (high)\n\nAbuse kubelet proxy endpoint to forward traffic to other pods and services on the node.\n**MITRE ATT&CK:** T1090\n\n**Remediation:** Restrict kubelet proxy access via RBAC\n\n**References:**\n- https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "runtime"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1090"
+                ]
+              }
+            },
+            {
+              "id": "writable_proc_privileged",
+              "name": "WritableProcfs+Privileged\u2014KernelManipulation",
+              "shortDescription": {
+                "text": "Writable procfs + privileged \u2014 kernel manipulation"
+              },
+              "fullDescription": {
+                "text": "Privileged container with writable /proc/sys/kernel allows core_pattern abuse and other kernel parameter manipulation."
+              },
+              "helpUri": "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+              "help": {
+                "text": "--privileged=false, mount /proc read-only",
+                "markdown": "**Writable procfs + privileged \u2014 kernel manipulation** (critical)\n\nPrivileged container with writable /proc/sys/kernel allows core_pattern abuse and other kernel parameter manipulation.\n**MITRE ATT&CK:** T1611\n\n**Remediation:** --privileged=false, mount /proc read-only\n\n**References:**\n- https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "combinatorial"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "k8s_kubelet_api",
+              "name": "DirectKubeletAPIAccess",
+              "shortDescription": {
+                "text": "Direct kubelet API access"
+              },
+              "fullDescription": {
+                "text": "Direct access to the kubelet API (port 10250) allows executing commands in any pod on the node."
+              },
+              "helpUri": "https://book.hacktricks.xyz/pentesting/pentesting-kubernetes/enumeration-from-a-pod",
+              "help": {
+                "text": "Enable kubelet authentication and authorization",
+                "markdown": "**Direct kubelet API access** (high)\n\nDirect access to the kubelet API (port 10250) allows executing commands in any pod on the node.\n**MITRE ATT&CK:** T1106\n\n**Remediation:** Enable kubelet authentication and authorization\n\n**References:**\n- https://book.hacktricks.xyz/pentesting/pentesting-kubernetes/enumeration-from-a-pod"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "runtime"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1106"
+                ]
+              }
+            },
+            {
+              "id": "lsm_selinux_unconfined",
+              "name": "SELinuxDisabled/unconfined",
+              "shortDescription": {
+                "text": "SELinux disabled/unconfined"
+              },
+              "fullDescription": {
+                "text": "SELinux is disabled or set to unconfined, removing the mandatory-access-control layer that would otherwise restrict container access to host resources. This is host-posture context, not a per-pod escape \u2014 it amplifies other primitives (privileged, capability adds, hostPath mounts) by removing the LSM safety net. On hosts with no SELinux at all (WSL2, Docker Desktop, most non-RHEL distros) this fires on every scan and is informational; pair with another finding for actionable risk."
+              },
+              "helpUri": "https://docs.docker.com/engine/security/selinux/",
+              "help": {
+                "text": "Enable SELinux: --security-opt label=type:container_t",
+                "markdown": "**SELinux disabled/unconfined** (low)\n\nSELinux is disabled or set to unconfined, removing the mandatory-access-control layer that would otherwise restrict container access to host resources. This is host-posture context, not a per-pod escape \u2014 it amplifies other primitives (privileged, capability adds, hostPath mounts) by removing the LSM safety net. On hosts with no SELinux at all (WSL2, Docker Desktop, most non-RHEL distros) this fires on every scan and is informational; pair with another finding for actionable risk.\n**MITRE ATT&CK:** T1611\n\n**Remediation:** Enable SELinux: --security-opt label=type:container_t\n\n**References:**\n- https://docs.docker.com/engine/security/selinux/"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "runtime"
+                ],
+                "security-severity": "2.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "devfs_access",
+              "name": "AccessTo/devHostDevices",
+              "shortDescription": {
+                "text": "Access to /dev host devices"
+              },
+              "fullDescription": {
+                "text": "Privileged containers have full access to host /dev, allowing direct read/write to disk devices and other hardware."
+              },
+              "helpUri": "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+              "help": {
+                "text": "--privileged=false, use --device for specific needs",
+                "markdown": "**Access to /dev host devices** (critical)\n\nPrivileged containers have full access to host /dev, allowing direct read/write to disk devices and other hardware.\n**MITRE ATT&CK:** T1006\n\n**Remediation:** --privileged=false, use --device for specific needs\n\n**References:**\n- https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "mount"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1006"
+                ]
+              }
+            },
+            {
+              "id": "procfs_sysrq",
+              "name": "/proc/sysrq-triggerAbuse",
+              "shortDescription": {
+                "text": "/proc/sysrq-trigger abuse"
+              },
+              "fullDescription": {
+                "text": "Writing to /proc/sysrq-trigger can crash or reboot the host kernel, causing denial of service. Requires both write access to the procfs path AND CAP_SYS_ADMIN \u2014 non-privileged containers see the file as writable per DAC but the kernel rejects the write with EROFS."
+              },
+              "helpUri": "https://docs.kernel.org/admin-guide/sysrq.html",
+              "help": {
+                "text": "Mount /proc read-only",
+                "markdown": "**/proc/sysrq-trigger abuse** (high)\n\nWriting to /proc/sysrq-trigger can crash or reboot the host kernel, causing denial of service. Requires both write access to the procfs path AND CAP_SYS_ADMIN \u2014 non-privileged containers see the file as writable per DAC but the kernel rejects the write with EROFS.\n**MITRE ATT&CK:** T1529\n\n**Remediation:** Mount /proc read-only\n\n**References:**\n- https://docs.kernel.org/admin-guide/sysrq.html"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "mount"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1529"
+                ]
+              }
+            },
+            {
+              "id": "proc_fd_symlink_traversal",
+              "name": "/proc/self/fdSymlinkToHost",
+              "shortDescription": {
+                "text": "/proc/self/fd symlink to host"
+              },
+              "fullDescription": {
+                "text": "Symlinks in /proc/self/fd can point to host filesystem locations, enabling file reads/writes outside the container. Every container has /proc/self/fd; the exploit primitive only yields host access when combined with a capability that permits reading the symlink target (CAP_DAC_READ_SEARCH or CAP_SYS_ADMIN), or with CVE-2024-21626-style runc fd leaks."
+              },
+              "helpUri": "https://nvd.nist.gov/vuln/detail/CVE-2024-21626",
+              "help": {
+                "text": "Restrict /proc access, use read-only /proc mounts",
+                "markdown": "**/proc/self/fd symlink to host** (high)\n\nSymlinks in /proc/self/fd can point to host filesystem locations, enabling file reads/writes outside the container. Every container has /proc/self/fd; the exploit primitive only yields host access when combined with a capability that permits reading the symlink target (CAP_DAC_READ_SEARCH or CAP_SYS_ADMIN), or with CVE-2024-21626-style runc fd leaks.\n**MITRE ATT&CK:** T1611\n\n**Remediation:** Restrict /proc access, use read-only /proc mounts\n\n**References:**\n- https://nvd.nist.gov/vuln/detail/CVE-2024-21626"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "mount"
+                ],
+                "security-severity": "8.0",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1611"
+                ]
+              }
+            },
+            {
+              "id": "cap_sys_rawio",
+              "name": "RawI/OToHostDevices",
+              "shortDescription": {
+                "text": "Raw I/O to host devices"
+              },
+              "fullDescription": {
+                "text": "CAP_SYS_RAWIO permits raw I/O port access and direct device manipulation, enabling low-level host compromise."
+              },
+              "helpUri": "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+              "help": {
+                "text": "--cap-drop=SYS_RAWIO",
+                "markdown": "**Raw I/O to host devices** (critical)\n\nCAP_SYS_RAWIO permits raw I/O port access and direct device manipulation, enabling low-level host compromise.\n**MITRE ATT&CK:** T1006, T1611\n\n**Remediation:** --cap-drop=SYS_RAWIO\n\n**References:**\n- https://man7.org/linux/man-pages/man7/capabilities.7.html"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "container-escape",
+                  "capability"
+                ],
+                "security-severity": "9.5",
+                "precision": "high",
+                "mitre-attack": [
+                  "T1006",
+                  "T1611"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "env_secret_leak",
+          "level": "warning",
+          "message": {
+            "text": "Container escape chain detected (severity=medium, score=0.95).\n\nChain: Secrets in environment variables\n\nSensitive credentials found in environment variables, accessible to any process in the container.",
+            "markdown": "### Secrets in environment variables\n\n**Severity:** medium \u00b7 **Composite score:** 0.95\n\n**PoC:**\n```sh\nenv | grep -iE '(key|secret|token|password|api|credential|auth)'\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "env_secret_leak",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.env_secret_leak"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.955,
+            "reliability-score": 0.95,
+            "stealth-score": 0.9,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "871e241f3043b892",
+            "techniques": [
+              "env_secret_leak"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "871e241f3043b892"
+          }
+        },
+        {
+          "ruleId": "cap_dac_read_search",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.91).\n\nChain: Read arbitrary host files\n\nCAP_DAC_READ_SEARCH bypasses file read permission checks and directory read/execute checks, allowing access to any file.",
+            "markdown": "### Read arbitrary host files\n\n**Severity:** high \u00b7 **Composite score:** 0.91\n\n**PoC:**\n```sh\n# Read host /etc/shadow bypassing permission checks\ncat /etc/shadow  # DAC_READ_SEARCH bypasses read permission checks\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_dac_read_search",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_dac_read_search"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.905,
+            "reliability-score": 0.95,
+            "stealth-score": 0.7,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "49e5f1fd9e107c44",
+            "techniques": [
+              "cap_dac_read_search"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "49e5f1fd9e107c44"
+          }
+        },
+        {
+          "ruleId": "k8s_configmap_secrets",
+          "level": "warning",
+          "message": {
+            "text": "Container escape chain detected (severity=medium, score=0.89).\n\nChain: K8s secrets mounted as volumes\n\nKubernetes secrets and configmaps mounted in the pod can be read by the service account token via the API server.",
+            "markdown": "### K8s secrets mounted as volumes\n\n**Severity:** medium \u00b7 **Composite score:** 0.89\n\n**PoC:**\n```sh\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) && curl -sk -H \"Authorization: Bearer $TOKEN\" https://kubernetes.default.svc/api/v1/namespaces/{namespace}/secrets\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "k8s_configmap_secrets",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.k8s_configmap_secrets"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.89,
+            "reliability-score": 0.85,
+            "stealth-score": 0.8,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "65168ee37a44b555",
+            "techniques": [
+              "k8s_configmap_secrets"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "65168ee37a44b555"
+          }
+        },
+        {
+          "ruleId": "k8s_service_account",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.84).\n\nChain: K8s SA token privilege escalation\n\nKubernetes service account token is mounted and can be used to query the API server for secrets, pods, and more.",
+            "markdown": "### K8s SA token privilege escalation\n\n**Severity:** high \u00b7 **Composite score:** 0.84\n\n**PoC:**\n```sh\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) && curl -sk -H \"Authorization: Bearer $TOKEN\" https://kubernetes.default.svc/api/v1/namespaces\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "k8s_service_account",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.k8s_service_account"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.845,
+            "reliability-score": 0.8,
+            "stealth-score": 0.7,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "02e451346256920a",
+            "techniques": [
+              "k8s_service_account"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "02e451346256920a"
+          }
+        },
+        {
+          "ruleId": "cap_dac_override",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.83).\n\nChain: Write arbitrary host files\n\nCAP_DAC_OVERRIDE bypasses file write permission checks, enabling writes to any host file accessible from the mount namespace. Note: CAP_DAC_OVERRIDE is part of the Docker default capability set; it is only an escape primitive when the container can already see host files (privileged, hostPath mount, or shared mount namespace).",
+            "markdown": "### Write arbitrary host files\n\n**Severity:** high \u00b7 **Composite score:** 0.83\n\n**PoC:**\n```sh\n# Write to host files bypassing permission checks\necho '{backdoor_user}:x:0:0::/root:/bin/bash' >> /host/etc/passwd\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_dac_override",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_dac_override"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.83,
+            "reliability-score": 0.95,
+            "stealth-score": 0.4,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "a46a951a94467656",
+            "techniques": [
+              "cap_dac_override"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "a46a951a94467656"
+          }
+        },
+        {
+          "ruleId": "tmpfs_shm_cross_container",
+          "level": "warning",
+          "message": {
+            "text": "Container escape chain detected (severity=medium, score=0.83).\n\nChain: Shared /dev/shm cross-container data exfil\n\nWritable /dev/shm shared between containers on the same host allows cross-container data exchange and exfiltration. Note: every container has a writable /dev/shm by default \u2014 this technique only represents an actual exposure when the IPC namespace is shared with the host (hostIPC) or with another pod via an explicit shared emptyDir volume.",
+            "markdown": "### Shared /dev/shm cross-container data exfil\n\n**Severity:** medium \u00b7 **Composite score:** 0.83\n\n**PoC:**\n```sh\n# Write to shared /dev/shm for cross-container exfil\necho 'exfil_data' > /dev/shm/shared_payload && ls -la /dev/shm/\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "tmpfs_shm_cross_container",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.tmpfs_shm_cross_container"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.83,
+            "reliability-score": 0.7,
+            "stealth-score": 0.8,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "5955fb51d2da06e4",
+            "techniques": [
+              "tmpfs_shm_cross_container"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "5955fb51d2da06e4"
+          }
+        },
+        {
+          "ruleId": "cap_net_admin",
+          "level": "warning",
+          "message": {
+            "text": "Container escape chain detected (severity=medium, score=0.82).\n\nChain: Network namespace manipulation\n\nCAP_NET_ADMIN allows network interface configuration, routing table modification, and ARP spoofing within the network namespace.",
+            "markdown": "### Network namespace manipulation\n\n**Severity:** medium \u00b7 **Composite score:** 0.82\n\n**PoC:**\n```sh\n# Manipulate network routing to intercept traffic\nip route add {target_network} via {gateway} dev eth0\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_net_admin",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_net_admin"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.82,
+            "reliability-score": 0.8,
+            "stealth-score": 0.6,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "4f6b9b6b2b6c7db9",
+            "techniques": [
+              "cap_net_admin"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "4f6b9b6b2b6c7db9"
+          }
+        },
+        {
+          "ruleId": "cap_sys_ptrace",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.80).\n\nChain: Ptrace host processes\n\nWith CAP_SYS_PTRACE and a shared PID namespace, attach to host processes and inject code for escape.",
+            "markdown": "### Ptrace host processes\n\n**Severity:** high \u00b7 **Composite score:** 0.80\n\n**PoC:**\n```sh\n# Attach to host PID 1 and inject shellcode\nnsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_sys_ptrace",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_sys_ptrace"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.795,
+            "reliability-score": 0.8,
+            "stealth-score": 0.5,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "a6eeca330cdc4f27",
+            "techniques": [
+              "cap_sys_ptrace"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "a6eeca330cdc4f27"
+          }
+        },
+        {
+          "ruleId": "cap_sys_admin_mount",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.79).\n\nChain: Mount host filesystem via CAP_SYS_ADMIN\n\nWith CAP_SYS_ADMIN the container can mount the host's block device and gain full read/write access to the host filesystem.",
+            "markdown": "### Mount host filesystem via CAP_SYS_ADMIN\n\n**Severity:** critical \u00b7 **Composite score:** 0.79\n\n**PoC:**\n```sh\nmkdir -p /mnt/host && mount /dev/{host_device} /mnt/host\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_sys_admin_mount",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_sys_admin_mount"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.785,
+            "reliability-score": 0.9,
+            "stealth-score": 0.3,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "23eef5a2a0aae06f",
+            "techniques": [
+              "cap_sys_admin_mount"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "23eef5a2a0aae06f"
+          }
+        },
+        {
+          "ruleId": "env_secret_leak",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.78).\n\nChain: Secrets in environment variables \u2192 K8s SA token privilege escalation\n\nSensitive credentials found in environment variables, accessible to any process in the container.",
+            "markdown": "### Secrets in environment variables\n\n**Severity:** high \u00b7 **Composite score:** 0.78\n\n**Chain steps:**\n1. `env_secret_leak` \u2014 Secrets in environment variables\n2. `k8s_service_account` \u2014 K8s SA token privilege escalation\n\n**PoC:**\n```sh\nenv | grep -iE '(key|secret|token|password|api|credential|auth)'\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) && curl -sk -H \"Authorization: Bearer $TOKEN\" https://kubernetes.default.svc/api/v1/namespaces\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "env_secret_leak",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.env_secret_leak"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.7826,
+            "reliability-score": 0.875,
+            "stealth-score": 0.8,
+            "confidence-score": 1.0,
+            "chain-length": 2,
+            "chain-id": "a50e7f0ba59d81fd",
+            "techniques": [
+              "env_secret_leak",
+              "k8s_service_account"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "a50e7f0ba59d81fd"
+          }
+        },
+        {
+          "ruleId": "cap_sys_admin_bpf",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.78).\n\nChain: eBPF-based escape\n\nUse CAP_SYS_ADMIN to load eBPF programs that can read/write arbitrary kernel memory, enabling privilege escalation.",
+            "markdown": "### eBPF-based escape\n\n**Severity:** critical \u00b7 **Composite score:** 0.78\n\n**PoC:**\n```sh\n# Load eBPF program to read kernel memory\nbpftool prog load /tmp/exploit.o /sys/fs/bpf/pwn type tracepoint\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_sys_admin_bpf",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_sys_admin_bpf"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.78,
+            "reliability-score": 0.7,
+            "stealth-score": 0.6,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "d9875ba833eaa7c0",
+            "techniques": [
+              "cap_sys_admin_bpf"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "d9875ba833eaa7c0"
+          }
+        },
+        {
+          "ruleId": "ebpf_probe_write_user",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.77).\n\nChain: bpf_probe_write_user kernel manipulation\n\nWith CAP_BPF or CAP_SYS_ADMIN, the bpf_probe_write_user helper can write to user-space memory of any process, enabling arbitrary code execution on the host.",
+            "markdown": "### bpf_probe_write_user kernel manipulation\n\n**Severity:** critical \u00b7 **Composite score:** 0.77\n\n**PoC:**\n```sh\n# Use bpf_probe_write_user to write to host process memory\nbpftool prog load /tmp/probe_write.o /sys/fs/bpf/pwn type tracepoint\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "ebpf_probe_write_user",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.ebpf_probe_write_user"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.765,
+            "reliability-score": 0.6,
+            "stealth-score": 0.7,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "cb583ddd0711b685",
+            "techniques": [
+              "ebpf_probe_write_user"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "cb583ddd0711b685"
+          }
+        },
+        {
+          "ruleId": "procfs_core_pattern",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.77).\n\nChain: Write to /proc/sys/kernel/core_pattern\n\nIf /proc/sys/kernel/core_pattern is writable AND the container has CAP_SYS_ADMIN, an attacker can set it to a pipe command that executes on the host when a core dump is triggered. Note: DAC permission alone is insufficient \u2014 kernel rejects writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even when the procfs mount appears writable to the container.",
+            "markdown": "### Write to /proc/sys/kernel/core_pattern\n\n**Severity:** critical \u00b7 **Composite score:** 0.77\n\n**PoC:**\n```sh\necho '|/tmp/payload.sh' > /proc/sys/kernel/core_pattern && echo '{payload_command}' > /tmp/payload.sh && chmod +x /tmp/payload.sh && sleep 1 && kill -SEGV $$\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "procfs_core_pattern",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.procfs_core_pattern"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.765,
+            "reliability-score": 0.85,
+            "stealth-score": 0.3,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "2e6f0278176dae3e",
+            "techniques": [
+              "procfs_core_pattern"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "2e6f0278176dae3e"
+          }
+        },
+        {
+          "ruleId": "k8s_node_proxy",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.76).\n\nChain: Kubelet node proxy abuse\n\nAbuse kubelet proxy endpoint to forward traffic to other pods and services on the node.",
+            "markdown": "### Kubelet node proxy abuse\n\n**Severity:** high \u00b7 **Composite score:** 0.76\n\n**PoC:**\n```sh\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) && curl -sk -H \"Authorization: Bearer $TOKEN\" https://kubernetes.default.svc/api/v1/nodes/{node_name}/proxy/pods\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "k8s_node_proxy",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.k8s_node_proxy"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.76,
+            "reliability-score": 0.65,
+            "stealth-score": 0.6,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "f404986c4a993b49",
+            "techniques": [
+              "k8s_node_proxy"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "f404986c4a993b49"
+          }
+        },
+        {
+          "ruleId": "writable_proc_privileged",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.76).\n\nChain: Writable procfs + privileged \u2014 kernel manipulation\n\nPrivileged container with writable /proc/sys/kernel allows core_pattern abuse and other kernel parameter manipulation.",
+            "markdown": "### Writable procfs + privileged \u2014 kernel manipulation\n\n**Severity:** critical \u00b7 **Composite score:** 0.76\n\n**PoC:**\n```sh\necho '|/tmp/payload.sh' > /proc/sys/kernel/core_pattern && echo '#!/bin/sh' > /tmp/payload.sh && echo '{payload_command}' >> /tmp/payload.sh && chmod +x /tmp/payload.sh && kill -SEGV $$\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "writable_proc_privileged",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.writable_proc_privileged"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.76,
+            "reliability-score": 0.9,
+            "stealth-score": 0.2,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "a0f450fad043f91b",
+            "techniques": [
+              "writable_proc_privileged"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "a0f450fad043f91b"
+          }
+        },
+        {
+          "ruleId": "k8s_kubelet_api",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.76).\n\nChain: Direct kubelet API access\n\nDirect access to the kubelet API (port 10250) allows executing commands in any pod on the node.",
+            "markdown": "### Direct kubelet API access\n\n**Severity:** high \u00b7 **Composite score:** 0.76\n\n**PoC:**\n```sh\ncurl -sk https://{node_ip}:10250/pods\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "k8s_kubelet_api",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.k8s_kubelet_api"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.755,
+            "reliability-score": 0.7,
+            "stealth-score": 0.5,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "16a8ba6400671ec5",
+            "techniques": [
+              "k8s_kubelet_api"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "16a8ba6400671ec5"
+          }
+        },
+        {
+          "ruleId": "lsm_selinux_unconfined",
+          "level": "note",
+          "message": {
+            "text": "Container escape chain detected (severity=low, score=0.76).\n\nChain: SELinux disabled/unconfined\n\nSELinux is disabled or set to unconfined, removing the mandatory-access-control layer that would otherwise restrict container access to host resources. This is host-posture context, not a per-pod escape \u2014 it amplifies other primitives (privileged, capability adds, hostPath mounts) by removing the LSM safety net. On hosts with no SELinux at all (WSL2, Docker Desktop, most non-RHEL distros) this fires on every scan and is informational; pair with another finding for actionable risk.",
+            "markdown": "### SELinux disabled/unconfined\n\n**Severity:** low \u00b7 **Composite score:** 0.76\n\n**PoC:**\n```sh\n# SELinux is disabled/unconfined \u2014 no MAC restrictions\ncat /proc/self/attr/current  # Check SELinux context\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "lsm_selinux_unconfined",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.lsm_selinux_unconfined"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.755,
+            "reliability-score": 0.7,
+            "stealth-score": 0.5,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "9fa14b3014d53d53",
+            "techniques": [
+              "lsm_selinux_unconfined"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "9fa14b3014d53d53"
+          }
+        },
+        {
+          "ruleId": "devfs_access",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.74).\n\nChain: Access to /dev host devices\n\nPrivileged containers have full access to host /dev, allowing direct read/write to disk devices and other hardware.",
+            "markdown": "### Access to /dev host devices\n\n**Severity:** critical \u00b7 **Composite score:** 0.74\n\n**PoC:**\n```sh\n# Mount host disk from /dev\nmkdir -p /mnt/host && mount /dev/{host_device} /mnt/host && ls /mnt/host\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "devfs_access",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.devfs_access"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.74,
+            "reliability-score": 0.85,
+            "stealth-score": 0.2,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "1d320b8cb0666415",
+            "techniques": [
+              "devfs_access"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "1d320b8cb0666415"
+          }
+        },
+        {
+          "ruleId": "procfs_sysrq",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.73).\n\nChain: /proc/sysrq-trigger abuse\n\nWriting to /proc/sysrq-trigger can crash or reboot the host kernel, causing denial of service. Requires both write access to the procfs path AND CAP_SYS_ADMIN \u2014 non-privileged containers see the file as writable per DAC but the kernel rejects the write with EROFS.",
+            "markdown": "### /proc/sysrq-trigger abuse\n\n**Severity:** high \u00b7 **Composite score:** 0.73\n\n**PoC:**\n```sh\n# Trigger host kernel crash (DANGEROUS)\necho c > /proc/sysrq-trigger\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "procfs_sysrq",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.procfs_sysrq"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.735,
+            "reliability-score": 0.9,
+            "stealth-score": 0.1,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "87a67cc22e6d85d2",
+            "techniques": [
+              "procfs_sysrq"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "87a67cc22e6d85d2"
+          }
+        },
+        {
+          "ruleId": "k8s_configmap_secrets",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.72).\n\nChain: K8s secrets mounted as volumes \u2192 Direct kubelet API access\n\nKubernetes secrets and configmaps mounted in the pod can be read by the service account token via the API server.",
+            "markdown": "### K8s secrets mounted as volumes\n\n**Severity:** high \u00b7 **Composite score:** 0.72\n\n**Chain steps:**\n1. `k8s_configmap_secrets` \u2014 K8s secrets mounted as volumes\n2. `k8s_kubelet_api` \u2014 Direct kubelet API access\n\n**PoC:**\n```sh\nTOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) && curl -sk -H \"Authorization: Bearer $TOKEN\" https://kubernetes.default.svc/api/v1/namespaces/{namespace}/secrets\ncurl -sk https://{node_ip}:10250/pods\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "k8s_configmap_secrets",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.k8s_configmap_secrets"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.7152,
+            "reliability-score": 0.7749999999999999,
+            "stealth-score": 0.65,
+            "confidence-score": 1.0,
+            "chain-length": 2,
+            "chain-id": "8cdd4e2ec4542afa",
+            "techniques": [
+              "k8s_configmap_secrets",
+              "k8s_kubelet_api"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "8cdd4e2ec4542afa"
+          }
+        },
+        {
+          "ruleId": "proc_fd_symlink_traversal",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.71).\n\nChain: /proc/self/fd symlink to host\n\nSymlinks in /proc/self/fd can point to host filesystem locations, enabling file reads/writes outside the container. Every container has /proc/self/fd; the exploit primitive only yields host access when combined with a capability that permits reading the symlink target (CAP_DAC_READ_SEARCH or CAP_SYS_ADMIN), or with CVE-2024-21626-style runc fd leaks.",
+            "markdown": "### /proc/self/fd symlink to host\n\n**Severity:** high \u00b7 **Composite score:** 0.71\n\n**PoC:**\n```sh\n# Traverse /proc/self/fd symlinks to access host files\nls -la /proc/self/fd/ && readlink /proc/self/fd/*\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "proc_fd_symlink_traversal",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.proc_fd_symlink_traversal"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.715,
+            "reliability-score": 0.6,
+            "stealth-score": 0.5,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "9fcef411a25f286d",
+            "techniques": [
+              "proc_fd_symlink_traversal"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "9fcef411a25f286d"
+          }
+        },
+        {
+          "ruleId": "tmpfs_shm_cross_container",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=high, score=0.71).\n\nChain: Shared /dev/shm cross-container data exfil \u2192 Ptrace host processes\n\nWritable /dev/shm shared between containers on the same host allows cross-container data exchange and exfiltration. Note: every container has a writable /dev/shm by default \u2014 this technique only represents an actual exposure when the IPC namespace is shared with the host (hostIPC) or with another pod via an explicit shared emptyDir volume.",
+            "markdown": "### Shared /dev/shm cross-container data exfil\n\n**Severity:** high \u00b7 **Composite score:** 0.71\n\n**Chain steps:**\n1. `tmpfs_shm_cross_container` \u2014 Shared /dev/shm cross-container data exfil\n2. `cap_sys_ptrace` \u2014 Ptrace host processes\n\n**PoC:**\n```sh\n# Write to shared /dev/shm for cross-container exfil\necho 'exfil_data' > /dev/shm/shared_payload && ls -la /dev/shm/\n# Attach to host PID 1 and inject shellcode\nnsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "tmpfs_shm_cross_container",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.tmpfs_shm_cross_container"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.7065,
+            "reliability-score": 0.75,
+            "stealth-score": 0.65,
+            "confidence-score": 1.0,
+            "chain-length": 2,
+            "chain-id": "a597da935d7dbd36",
+            "techniques": [
+              "tmpfs_shm_cross_container",
+              "cap_sys_ptrace"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "a597da935d7dbd36"
+          }
+        },
+        {
+          "ruleId": "cap_sys_rawio",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.70).\n\nChain: Raw I/O to host devices\n\nCAP_SYS_RAWIO permits raw I/O port access and direct device manipulation, enabling low-level host compromise.",
+            "markdown": "### Raw I/O to host devices\n\n**Severity:** critical \u00b7 **Composite score:** 0.70\n\n**PoC:**\n```sh\n# Direct disk read via raw I/O\ndd if=/dev/{host_device} of=/tmp/disk_dump bs=512 count=1024\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "cap_sys_rawio",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.cap_sys_rawio"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.7,
+            "reliability-score": 0.75,
+            "stealth-score": 0.2,
+            "confidence-score": 1.0,
+            "chain-length": 1,
+            "chain-id": "3dfd65387f06bfdb",
+            "techniques": [
+              "cap_sys_rawio"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "3dfd65387f06bfdb"
+          }
+        },
+        {
+          "ruleId": "lsm_selinux_unconfined",
+          "level": "error",
+          "message": {
+            "text": "Container escape chain detected (severity=critical, score=0.67).\n\nChain: SELinux disabled/unconfined \u2192 Mount host filesystem via CAP_SYS_ADMIN\n\nSELinux is disabled or set to unconfined, removing the mandatory-access-control layer that would otherwise restrict container access to host resources. This is host-posture context, not a per-pod escape \u2014 it amplifies other primitives (privileged, capability adds, hostPath mounts) by removing the LSM safety net. On hosts with no SELinux at all (WSL2, Docker Desktop, most non-RHEL distros) this fires on every scan and is informational; pair with another finding for actionable risk.",
+            "markdown": "### SELinux disabled/unconfined\n\n**Severity:** critical \u00b7 **Composite score:** 0.67\n\n**Chain steps:**\n1. `lsm_selinux_unconfined` \u2014 SELinux disabled/unconfined\n2. `cap_sys_admin_mount` \u2014 Mount host filesystem via CAP_SYS_ADMIN\n\n**PoC:**\n```sh\n# SELinux is disabled/unconfined \u2014 no MAC restrictions\ncat /proc/self/attr/current  # Check SELinux context\nmkdir -p /mnt/host && mount /dev/{host_device} /mnt/host\n```"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "container://system-monitor-deployment-558fc5987d-bzfxv",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              },
+              "logicalLocations": [
+                {
+                  "name": "lsm_selinux_unconfined",
+                  "kind": "type",
+                  "fullyQualifiedName": "cepheus.technique.lsm_selinux_unconfined"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "composite-score": 0.6696,
+            "reliability-score": 0.8,
+            "stealth-score": 0.4,
+            "confidence-score": 1.0,
+            "chain-length": 2,
+            "chain-id": "c41808d3fc60f014",
+            "techniques": [
+              "lsm_selinux_unconfined",
+              "cap_sys_admin_mount"
+            ]
+          },
+          "partialFingerprints": {
+            "chainFingerprint/v1": "c41808d3fc60f014"
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true,
+          "endTimeUtc": "2026-05-28T00:56:15.636476+00:00"
+        }
+      ],
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "uri": "file:///"
+        }
+      },
+      "properties": {
+        "posture-hostname": "system-monitor-deployment-558fc5987d-bzfxv",
+        "posture-kernel": "6.6.114.1-microsoft-standard-WSL2",
+        "techniques-checked": 65,
+        "techniques-matched": 20
+      }
+    }
+  ]
+}

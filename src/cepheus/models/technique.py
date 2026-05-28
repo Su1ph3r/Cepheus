@@ -78,3 +78,25 @@ class EscapeTechnique(BaseModel):
             "the only confirmation is actual exploitation)."
         ),
     )
+    # Compliance crosswalk: identifiers in popular control frameworks.
+    # Populated incrementally — the absence of a mapping means "not
+    # yet enumerated", not "no applicable control". Auditors translate
+    # finding ids back into the framework they're being measured
+    # against; storing the IDs verbatim lets a SARIF consumer (or the
+    # web viewer) surface them inline without a lookup table.
+    cis_kubernetes_benchmark: list[str] = Field(
+        default_factory=list,
+        description=(
+            "CIS Kubernetes Benchmark control IDs the technique violates or undermines (e.g. ['5.2.1', '5.2.6'])."
+        ),
+    )
+    nist_800_190: list[str] = Field(
+        default_factory=list,
+        description=(
+            "NIST SP 800-190 (Application Container Security Guide) control references (e.g. ['4.1.1', '4.2.4'])."
+        ),
+    )
+    pci_dss: list[str] = Field(
+        default_factory=list,
+        description=("PCI DSS v4 requirement IDs (e.g. ['2.2.5', '6.4.1'])."),
+    )

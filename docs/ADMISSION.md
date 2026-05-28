@@ -185,6 +185,42 @@ Then label namespaces you want gated:
 kubectl label namespace prod cepheus.io/admission=enabled
 ```
 
+### Per-pod policy override
+
+Workload authors can request a weaker enforcement mode on a specific
+pod by setting the `cepheus.io/policy` label on `pod.metadata.labels`:
+
+| Value     | Effect                                                                          |
+|-----------|---------------------------------------------------------------------------------|
+| (absent)  | Default. The configured gates apply normally.                                   |
+| `enforce` | Same as absent — explicit form, useful when codifying the default.              |
+| `warn`    | Run the analysis; on a would-be deny, admit the pod and surface the gate reason as a `kubectl` warning. Useful for soft-launching a new gate without blocking rollouts. |
+| `skip`    | Skip analysis entirely. The pod is admitted with no warnings. The audit log line still records the skip (`admission SKIP ... label cepheus.io/policy=skip`). |
+
+Example — a CI/test pod that intentionally runs privileged:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dind-runner
+  labels:
+    cepheus.io/policy: skip
+spec:
+  containers:
+    - name: docker
+      image: docker:dind
+      securityContext:
+        privileged: true
+```
+
+The label is on the Pod, not the namespace. If you want every pod in
+a namespace exempt, prefer the `namespaceSelector` approach above —
+it's the standard Kubernetes mechanism and doesn't depend on every
+pod author remembering to set the label. Unknown label values fall
+back to `enforce` (strictest), so a typo never silently weakens the
+gate.
+
 ### Behaviour on internal error
 
 Two modes:

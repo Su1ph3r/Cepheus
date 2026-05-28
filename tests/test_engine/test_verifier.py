@@ -344,20 +344,20 @@ def test_verify_command_field_populated_on_safe_subset():
 
 
 def test_verifier_coverage_meets_minimum():
-    """Regression guard against verifier-coverage backsliding. v0.4.0 ships
-    47/65 techniques with verify_command (72% coverage). This test fails if
-    the coverage drops below the v0.4.0 floor — preventing accidental
-    deletion of probes during refactoring."""
+    """Regression guard against verifier-coverage backsliding. Floor raised
+    over time as new probes land. Current coverage is 57/65 with
+    verify_command (88%). This test fails if coverage drops below the floor —
+    preventing accidental deletion of probes during refactoring."""
     from cepheus.engine.technique_db import get_all_techniques
 
     techs = get_all_techniques()
     with_v = [t for t in techs if t.verify_command]
-    # Floor: 40 techniques (v0.4.0 ships 47; allow small downward drift for
-    # legitimate removals — anything above 40 keeps the differentiator intact).
-    assert len(with_v) >= 40, (
-        f"Verifier coverage dropped below 40/65 floor — currently {len(with_v)}/65. "
-        f"Adding new techniques without verify_command is fine; REMOVING existing "
-        f"verify_commands erodes Cepheus's primary moat."
+    # Floor: 55. Current coverage is 57 — allow some drift for legitimate
+    # removals (e.g. a probe that turns out to be flaky) without breaking CI.
+    assert len(with_v) >= 55, (
+        f"Verifier coverage dropped below 55/65 floor — currently {len(with_v)}/65. "
+        f"Adding new techniques without verify_command is fine; removing existing "
+        f"verify_commands without a replacement is the regression we guard against."
     )
 
 

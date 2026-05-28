@@ -1,0 +1,200 @@
+name: admission-e2e
+
+# End-to-end test for the ValidatingAdmissionWebhook against a real
+# (kind) cluster. Builds the Cepheus image, loads it into kind,
+# installs the Helm chart with self-signed TLS, then asserts:
+#   1. a privileged pod is DENIED by the configured gate;
+#   2. a hardened pod is ADMITTED;
+#   3. a privileged pod carrying `cepheus.io/policy=skip` is ADMITTED
+#      with no warnings (the new per-pod policy override).
+#
+# Runs on push to main and on a weekly cron — kind cluster spin-up is
+# ~3 minutes and we don't want it on every PR. PR-time coverage is via
+# the unit-test suite, which exercises `_handle_admission` directly.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/cepheus/server/**"
+      - "charts/cepheus-admission/**"
+      - "Dockerfile"
+      - ".github/workflows/admission-e2e.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "13 5 * * 1"  # Monday 05:13 UTC
+
+concurrency:
+  group: admission-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: kind + helm + admission webhook
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Cepheus image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: cepheus:e2e
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: cepheus-e2e
+          # Pin to a kind/k8s version known to work with the
+          # ValidatingAdmissionWebhook v1 API surface we use.
+          node_image: kindest/node:v1.31.0
+          wait: 120s
+
+      - name: Load image into kind
+        run: kind load docker-image cepheus:e2e --name cepheus-e2e
+
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
+          kubectl -n cert-manager wait --for=condition=Available --timeout=180s \
+            deploy/cert-manager deploy/cert-manager-webhook deploy/cert-manager-cainjector
+
+      - name: Install admission webhook chart
+        run: |
+          helm install cepheus-admission charts/cepheus-admission \
+            --namespace cepheus-system --create-namespace \
+            --set image.repository=cepheus \
+            --set image.tag=e2e \
+            --set image.pullPolicy=Never \
+            --set gate.maxSeverity=critical \
+            --set replicaCount=1 \
+            --wait --timeout 5m
+
+      - name: Show webhook state for debugging
+        if: always()
+        run: |
+          kubectl -n cepheus-system get pods,svc,validatingwebhookconfiguration
+          kubectl -n cepheus-system describe pod -l app.kubernetes.io/name=cepheus-admission
+          kubectl -n cepheus-system logs -l app.kubernetes.io/name=cepheus-admission --tail=200 || true
+
+      - name: Privileged pod must be DENIED
+        run: |
+          set +e
+          out=$(kubectl apply -f - 2>&1 <<'YAML'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: e2e-privileged
+            namespace: default
+          spec:
+            containers:
+              - name: app
+                image: busybox
+                command: ["sh", "-c", "sleep 3600"]
+                securityContext:
+                  privileged: true
+          YAML
+          )
+          rc=$?
+          set -e
+          echo "$out"
+          if [ $rc -eq 0 ]; then
+            echo "::error::Privileged pod was ADMITTED — gate is broken"
+            exit 1
+          fi
+          echo "$out" | grep -q "Cepheus admission gate" || {
+            echo "::error::Pod was denied but NOT by Cepheus — deny came from somewhere else"
+            exit 1
+          }
+
+      - name: Hardened pod must be ADMITTED
+        run: |
+          kubectl apply -f - <<'YAML'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: e2e-hardened
+            namespace: default
+          spec:
+            automountServiceAccountToken: false
+            containers:
+              - name: app
+                image: busybox
+                command: ["sh", "-c", "sleep 3600"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  privileged: false
+                  readOnlyRootFilesystem: true
+                  runAsNonRoot: true
+                  runAsUser: 1000
+                  capabilities:
+                    drop: ["ALL"]
+                  seccompProfile:
+                    type: RuntimeDefault
+          YAML
+          kubectl -n default get pod e2e-hardened -o jsonpath='{.status.phase}'
+
+      - name: Privileged pod with policy=skip must be ADMITTED
+        run: |
+          kubectl apply -f - <<'YAML'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: e2e-priv-skip
+            namespace: default
+            labels:
+              cepheus.io/policy: skip
+          spec:
+            containers:
+              - name: app
+                image: busybox
+                command: ["sh", "-c", "sleep 3600"]
+                securityContext:
+                  privileged: true
+          YAML
+          kubectl -n default get pod e2e-priv-skip -o jsonpath='{.status.phase}'
+
+      - name: Privileged pod with policy=warn must be ADMITTED with warning
+        run: |
+          out=$(kubectl apply -f - 2>&1 <<'YAML'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: e2e-priv-warn
+            namespace: default
+            labels:
+              cepheus.io/policy: warn
+          spec:
+            containers:
+              - name: app
+                image: busybox
+                command: ["sh", "-c", "sleep 3600"]
+                securityContext:
+                  privileged: true
+          YAML
+          )
+          echo "$out"
+          # kubectl prints warnings as "Warning: ..." lines on stderr but
+          # apply merges stdout/stderr above; either way we must see the
+          # warn-mode prefix.
+          echo "$out" | grep -q "Cepheus (warn mode)" || {
+            echo "::error::policy=warn did not surface the gate reason as a warning"
+            exit 1
+          }
+          kubectl -n default get pod e2e-priv-warn -o jsonpath='{.status.phase}'
+
+      - name: Tail logs on success
+        if: success()
+        run: |
+          kubectl -n cepheus-system logs -l app.kubernetes.io/name=cepheus-admission --tail=200

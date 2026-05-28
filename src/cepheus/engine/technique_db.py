@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 
 from cepheus.models.technique import (
     EscapeTechnique,
@@ -12,10 +13,107 @@ from cepheus.models.technique import (
 )
 
 _TECHNIQUES: list[EscapeTechnique] | None = None
+# Guards the lazy build below. Created at import time (never lazily) so the
+# lock itself can't race. The threaded admission server and the fleet
+# ThreadPoolExecutor can both hit a cold cache concurrently.
+_TECHNIQUES_LOCK = threading.Lock()
+
+# Compliance crosswalk — control IDs from CIS Kubernetes Benchmark,
+# NIST SP 800-190, and PCI DSS v4 that each technique violates or
+# undermines. Maintained as a single side-car dict rather than
+# inline-on-each-technique so the technique definitions stay readable
+# and so the compliance mapping has one source of truth that's easy
+# to audit + extend. Techniques absent from this map carry empty lists,
+# which means "not yet enumerated" not "no applicable control".
+#
+# CIS Kubernetes Benchmark IDs reference v1.10 (2024). NIST 800-190
+# IDs reference the 2017 publication's section numbers, which remain
+# the canonical mapping until 800-190r1 publishes. PCI DSS IDs
+# reference v4.0.1.
+_COMPLIANCE_CROSSWALK: dict[str, dict[str, list[str]]] = {
+    "cap_sys_admin_mount": {
+        "cis": ["5.2.1", "5.2.6", "5.2.8"],
+        "nist": ["4.2.4", "4.2.5"],
+        "pci": ["2.2.5", "7.2.1"],
+    },
+    "cap_sys_admin_cgroup_escape": {
+        "cis": ["5.2.1", "5.2.6"],
+        "nist": ["4.2.4", "4.2.5"],
+        "pci": ["2.2.5"],
+    },
+    "cap_sys_admin_bpf": {"cis": ["5.2.1"], "nist": ["4.2.5"], "pci": ["2.2.5"]},
+    "cap_sys_ptrace": {"cis": ["5.2.8"], "nist": ["4.2.4"], "pci": ["2.2.5"]},
+    "cap_dac_read_search": {"cis": ["5.2.8"], "nist": ["4.2.4"], "pci": ["2.2.5"]},
+    "cap_dac_override": {"cis": ["5.2.8"], "nist": ["4.2.4"], "pci": ["2.2.5"]},
+    "cap_net_admin": {"cis": ["5.2.8"], "nist": ["4.2.4"], "pci": ["1.2.1"]},
+    "cap_sys_rawio": {"cis": ["5.2.8"], "nist": ["4.2.4"], "pci": ["2.2.5"]},
+    "docker_socket_mount": {
+        "cis": ["5.1.5", "5.2.6"],
+        "nist": ["4.5.1", "4.5.2"],
+        "pci": ["6.4.1"],
+    },
+    "containerd_sock_mount": {"cis": ["5.1.5", "5.2.6"], "nist": ["4.5.1"], "pci": ["6.4.1"]},
+    "crio_sock_mount": {"cis": ["5.1.5", "5.2.6"], "nist": ["4.5.1"], "pci": ["6.4.1"]},
+    "hostpath_mount_root": {
+        "cis": ["5.2.10", "5.7.2"],
+        "nist": ["4.2.2", "4.5.4"],
+        "pci": ["2.2.5"],
+    },
+    "hostpath_mount_etc": {"cis": ["5.2.10", "5.7.2"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "procfs_sysrq": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "procfs_core_pattern": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "k8s_service_account": {
+        "cis": ["5.1.5", "5.1.6"],
+        "nist": ["4.5.2"],
+        "pci": ["7.2.1", "8.2.1"],
+    },
+    "k8s_configmap_secrets": {
+        "cis": ["5.4.1", "5.4.2"],
+        "nist": ["4.3.5"],
+        "pci": ["3.5.1", "8.6.1"],
+    },
+    "env_secret_leak": {
+        "cis": ["5.4.1"],
+        "nist": ["4.3.5"],
+        "pci": ["3.5.1", "8.6.1"],
+    },
+    "cloud_metadata_ssrf": {
+        "cis": ["5.7.4"],
+        "nist": ["4.5.5"],
+        "pci": ["1.3.1"],
+    },
+    "lsm_apparmor_unconfined": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
+    "lsm_selinux_unconfined": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
+    "cap_sys_admin_no_seccomp": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
+}
+
+
+def _apply_compliance(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
+    """Merge ``_COMPLIANCE_CROSSWALK`` into the techniques in place.
+
+    Kept as a separate pass over the built list so the inline technique
+    definitions don't carry the noisy compliance-id lists — those
+    triple the visual weight of every technique constructor and made
+    code review of technique-DB changes much harder.
+    """
+    for t in techs:
+        mapping = _COMPLIANCE_CROSSWALK.get(t.id)
+        if not mapping:
+            continue
+        t.cis_kubernetes_benchmark = list(mapping.get("cis", []))
+        t.nist_800_190 = list(mapping.get("nist", []))
+        t.pci_dss = list(mapping.get("pci", []))
+    return techs
 
 
 def _build_techniques() -> list[EscapeTechnique]:
     """Build and return all 65 escape techniques."""
+    techs = _raw_techniques()
+    return _apply_compliance(techs)
+
+
+def _raw_techniques() -> list[EscapeTechnique]:
+    """Pure technique definitions, no compliance crosswalk applied."""
     return [
         # ── CAPABILITY (9) ───────────────────────────────────────────
         EscapeTechnique(
@@ -908,6 +1006,15 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.5,
             remediation="Update kernel to >= 5.16.2",
+            # legacy_parse_param() is reached via a mount of a user-namespaced
+            # fs context. The exploit needs (a) vulnerable kernel (matcher
+            # checks via posture) and (b) unprivileged user-namespace + mount
+            # surface available inside the container. Probe (b) by trying to
+            # create a transient user+net+mount namespace; success means the
+            # syscall chain the PoC opens is reachable. Failure (seccomp,
+            # unprivileged_userns_clone=0, AppArmor deny) means the precondition
+            # is missing and the static-posture match was a false positive.
+            verify_command="unshare -Urn true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2022_0847",
@@ -935,6 +1042,19 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.9,
             stealth=0.6,
             remediation="Update kernel to >= 5.16.11",
+            # DirtyPipe needs no capabilities — only a kernel in the
+            # vulnerable band (5.8 .. 5.16.11). The static matcher already
+            # checks /proc/version, but in-container `uname -r` is the
+            # authoritative live signal. Done as a portable awk
+            # numeric-compare so we don't depend on `sort -V` (busybox
+            # often lacks it). Parses M.m.p out of the release string
+            # `5.10.110-3-amd64` etc; the `[.-]` field separator handles
+            # both vanilla and distro-suffixed forms.
+            verify_command=(
+                'k=$(uname -r); v=$(echo "$k" | awk -F"[.-]" '
+                "'{printf \"%d\", $1*10000+$2*100+$3}'); "
+                '[ -n "$v" ] && [ "$v" -ge 50800 ] && [ "$v" -lt 51611 ]'
+            ),
         ),
         EscapeTechnique(
             id="cve_2021_22555",
@@ -962,6 +1082,12 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.65,
             stealth=0.4,
             remediation="Update kernel to >= 5.12",
+            # IPT_SO_SET_REPLACE setsockopt is reached only after the
+            # exploit has set up its own user+net namespace with
+            # CAP_NET_ADMIN inside it. Probe that we can actually open
+            # such a namespace; if seccomp/AppArmor blocks unshare, the
+            # PoC can't even start.
+            verify_command="unshare -Urn true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2022_2588",
@@ -985,6 +1111,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.4,
             remediation="Update kernel to >= 5.19.2",
+            # cls_route is reached via tc / netlink from inside a user+net
+            # namespace. unshare-ability is the necessary surface check.
+            verify_command="unshare -Urn true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2023_0386",
@@ -1011,6 +1140,11 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.75,
             stealth=0.5,
             remediation="Update kernel to >= 6.2",
+            # OverlayFS copy-up setuid bug is reachable by mounting an
+            # overlay from a userns-owned mount namespace. The PoC begins
+            # with `unshare -Urm`, so a positive probe says the necessary
+            # mount-in-userns surface is available.
+            verify_command="unshare -Urm true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2023_32233",
@@ -1037,6 +1171,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.65,
             stealth=0.4,
             remediation="Update kernel to >= 6.4",
+            # nf_tables batch handling is reached via netlink from inside
+            # a user+net namespace. The PoC's first step is `unshare -Urn`.
+            verify_command="unshare -Urn true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2024_1086",
@@ -1063,6 +1200,9 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.4,
             remediation="Update kernel to >= 6.8",
+            # nf_tables verdict double-free is reached via the same
+            # userns + netlink path as CVE-2023-32233.
+            verify_command="unshare -Urn true 2>/dev/null",
         ),
         EscapeTechnique(
             id="cve_2021_31440",
@@ -1129,6 +1269,22 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.6,
             stealth=0.5,
             remediation="Update kernel to >= 5.16",
+            # eBPF verifier type-confusion needs the BPF syscall surface
+            # open. That means either (a) CAP_BPF in CapEff (bit 39 = 1<<39
+            # = 0x8000000000), (b) CAP_SYS_ADMIN (bit 21 = 1<<21 = 0x200000),
+            # or (c) unprivileged_bpf_disabled=0. Probe all three:
+            # exit 0 if any one is true. Uses POSIX shell arithmetic which
+            # accepts 0x literals; the masks fit in a 64-bit signed long
+            # so this works on every 64-bit host (the only arch container
+            # CVE-2022-23222 applies to).
+            verify_command=(
+                'b=$(awk "/^CapEff:/ {print \\$2}" /proc/self/status); '
+                'if [ -n "$b" ]; then '
+                "  if [ $((0x$b & 0x8000000000)) -ne 0 ]; then exit 0; fi; "
+                "  if [ $((0x$b & 0x200000)) -ne 0 ]; then exit 0; fi; "
+                "fi; "
+                '[ "$(cat /proc/sys/kernel/unprivileged_bpf_disabled 2>/dev/null)" = "0" ]'
+            ),
         ),
         EscapeTechnique(
             id="cve_2024_21626",
@@ -1170,6 +1326,25 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.75,
             stealth=0.6,
             remediation="Update runc to >= 1.1.12",
+            # The bug is a runc-side FD leak: when a container is started
+            # with WORKDIR=/proc/self/fd/N, runc accidentally hands the
+            # container a directory FD that points OUT of the container
+            # root (into /run/containerd or /var/lib/docker). The exploit
+            # primitive — a leaked host-filesystem FD — can be detected by
+            # walking /proc/self/fd and matching readlink targets against
+            # known runtime-state paths. A match = the runc FD leak is
+            # actually present in THIS running container, not just the
+            # version is vulnerable. No match = either the runc version
+            # is patched, or the leak path differs on this runtime.
+            verify_command=(
+                "for fd in /proc/self/fd/*; do "
+                't=$(readlink "$fd" 2>/dev/null); '
+                'case "$t" in '
+                "/run/containerd*|/run/runc*|/var/lib/docker*|/var/lib/containerd*|/run/docker*) "
+                "exit 0;; "
+                "esac; "
+                "done; exit 1"
+            ),
         ),
         EscapeTechnique(
             id="cve_2024_53104",
@@ -1860,6 +2035,21 @@ def _build_techniques() -> list[EscapeTechnique]:
             reliability=0.7,
             stealth=0.3,
             remediation="Upgrade ingress-nginx to >= 1.12.1 or >= 1.11.5. Restrict network access to admission webhook.",
+            # IngressNightmare requires the ingress-nginx admission webhook
+            # to be network-reachable from the container. Probe DNS for
+            # the canonical webhook service name in its default namespace
+            # — if it resolves, the cluster has ingress-nginx installed
+            # AND the pod's NetworkPolicy permits east-west DNS to it.
+            # Tries both `getent hosts` (glibc) and `nslookup` (busybox /
+            # musl) so the probe works in Alpine-based containers too.
+            verify_command=(
+                "getent hosts "
+                "ingress-nginx-controller-admission.ingress-nginx.svc.cluster.local "
+                "2>/dev/null || "
+                "nslookup "
+                "ingress-nginx-controller-admission.ingress-nginx.svc.cluster.local "
+                "2>/dev/null | grep -qi address"
+            ),
         ),
         EscapeTechnique(
             id="cve_2025_9074",
@@ -2242,7 +2432,11 @@ def get_all_techniques() -> list[EscapeTechnique]:
     """
     global _TECHNIQUES
     if _TECHNIQUES is None:
-        _TECHNIQUES = _build_techniques()
+        with _TECHNIQUES_LOCK:
+            # Re-check inside the lock: another thread may have built it
+            # while we were blocked acquiring the lock.
+            if _TECHNIQUES is None:
+                _TECHNIQUES = _build_techniques()
     return copy.deepcopy(_TECHNIQUES)
 
 

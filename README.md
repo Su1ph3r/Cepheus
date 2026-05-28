@@ -81,8 +81,28 @@ cepheus techniques --search "sys_admin"
 cepheus techniques --severity critical
 ```
 
+```bash
+# scan every running pod in a cluster and diff posture over time
+cepheus fleet scan -o fleet-before.json
+cepheus fleet scan --namespace prod --selector "tier=backend" -o fleet-after.json
+cepheus fleet diff fleet-before.json fleet-after.json --fail-on-regression
+```
+
+```bash
+# check whether a newer release is published
+cepheus update
+cepheus update --fail-if-outdated   # non-zero exit in CI when out of date
+```
+
+`cepheus fleet scan` shells out to `kubectl`, so it uses your current
+kubeconfig/context unless `--kubeconfig` / `--context` override them.
+
 See [docs/CI.md](docs/CI.md) for the full CI integration guide, including
-the GitHub Actions workflow that uploads SARIF to Code Scanning.
+the GitHub Actions workflow that uploads SARIF to Code Scanning, and
+[docs/ADMISSION.md](docs/ADMISSION.md) for the Kubernetes admission
+webhook (`cepheus admission-server`), including Slack / PagerDuty
+deny notifications and compliance-crosswalk (CIS / NIST 800-190 /
+PCI-DSS) reporting.
 
 ## GitHub Actions integration
 

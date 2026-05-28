@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`cepheus fleet scan`** — enumerate every running pod in a cluster via
+  `kubectl get pods -o json` and analyze each one, emitting a fleet report
+  (JSON). Supports `--namespace`, `--selector`, `--context`, `--kubeconfig`,
+  and `--parallel`. Per-pod analyzer failures are captured in the report
+  rather than aborting the scan.
+- **`cepheus fleet diff <before> <after>`** — compute the posture delta
+  between two fleet reports (pods added/removed/regressed/improved, with
+  per-pod chain and score changes). `--fail-on-regression` exits non-zero
+  when any pod gains chains or raises its score, for CI drift gating.
+- **`cepheus update`** — check whether a newer published release is
+  available and print the upgrade command for each install channel.
+  `--fail-if-outdated` exits non-zero when an upgrade is available. The
+  check is unauthenticated and read-only; no in-place self-upgrade.
+- **Admission webhook outbound notifications.** `cepheus admission-server`
+  gains `--slack-webhook-url` and `--pagerduty-routing-key` (also via the
+  `CEPHEUS_SLACK_WEBHOOK_URL` / `CEPHEUS_PAGERDUTY_ROUTING_KEY` env vars).
+  Every DENY (and WARN-mode near-deny) is POSTed to the configured
+  channels. Delivery is best-effort, rate-limited, and dispatched on
+  background threads so it never blocks the admission decision.
+- **Compliance crosswalk.** Techniques can carry CIS Kubernetes Benchmark,
+  NIST SP 800-190, and PCI-DSS control identifiers, surfaced in SARIF rule
+  properties and the HTML report. A curated starter set maps the
+  capability, socket, mount, and secret families.
+- **Performance regression suite.** CI pins analyzer wall-clock and
+  peak-allocation budgets over the K8s Goat fixtures so an algorithmic
+  regression is caught at build time.
+- **Admission webhook end-to-end test.** A kind-based workflow exercises
+  the webhook against a live cluster.
+
+### Changed
+
+- Verifier coverage raised to 57/65; the coverage regression floor is now
+  55/65 (was 47/65).
+
 ## [0.6.3] - 2026-05-27
 
 Patch release fixing a packaging bug that prevented any PyPI install

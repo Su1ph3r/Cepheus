@@ -1073,6 +1073,27 @@ def admission_server(
             "for kernel posture, which only changes on node reboot. Floor 5s, ceiling 1h."
         ),
     ),
+    slack_webhook_url: str | None = typer.Option(
+        None,
+        "--slack-webhook-url",
+        envvar="CEPHEUS_SLACK_WEBHOOK_URL",
+        help=(
+            "Slack incoming-webhook URL. When set, every admission DENY (and WARN-mode "
+            "near-deny) is POSTed to this webhook as a chat message. Best-effort, "
+            "rate-limited, non-blocking. Prefer the env var or a Kubernetes Secret over "
+            "the flag — flag values are visible in `kubectl describe pod`."
+        ),
+    ),
+    pagerduty_routing_key: str | None = typer.Option(
+        None,
+        "--pagerduty-routing-key",
+        envvar="CEPHEUS_PAGERDUTY_ROUTING_KEY",
+        help=(
+            "PagerDuty Events API v2 routing key. When set, every admission DENY "
+            "triggers a `severity=error` PagerDuty event; WARN-mode events use "
+            "`severity=warning` so they don't page on-call by default."
+        ),
+    ),
     fail_open: bool = typer.Option(
         True,
         "--fail-open/--fail-closed",
@@ -1101,6 +1122,7 @@ def admission_server(
     """
     from cepheus.server.admission import load_admission_config, serve
     from cepheus.server.k8s_client import K8sAPIError, K8sClient, NodeKernelCache
+    from cepheus.server.notifiers import NotifierConfig
 
     import logging
 
@@ -1149,6 +1171,11 @@ def admission_server(
     # previous duplicated ``if node_cache is not None: node_cache.stop()``
     # at each early-exit site would have leaked on any exception type
     # we hadn't enumerated.
+    notifier_cfg = NotifierConfig(
+        slack_webhook_url=slack_webhook_url or None,
+        pagerduty_routing_key=pagerduty_routing_key or None,
+    )
+
     try:
         try:
             cfg = load_admission_config(
@@ -1158,6 +1185,7 @@ def admission_server(
                 include_kernel_cves=include_kernel_cves,
                 fail_open_on_error=fail_open,
                 node_kernel_cache=node_cache,
+                notifier_config=notifier_cfg,
             )
         except ValueError as exc:
             console.print(f"[red]Error: {exc}[/red]")
@@ -1187,6 +1215,159 @@ def admission_server(
     finally:
         if node_cache is not None:
             node_cache.stop()
+
+
+fleet_app = typer.Typer(
+    name="fleet",
+    help="Multi-pod cluster operations: scan all pods, diff two snapshots.",
+    no_args_is_help=True,
+)
+app.add_typer(fleet_app, name="fleet")
+
+
+@fleet_app.command("scan")
+def fleet_scan(
+    namespace: str | None = typer.Option(
+        None, "--namespace", "-n", help="Limit scan to one namespace (default: all namespaces)."
+    ),
+    selector: str | None = typer.Option(None, "--selector", "-l", help="Label selector, e.g. 'app=api,tier=backend'."),
+    context: str | None = typer.Option(None, "--context", help="kubeconfig context to use (default: current context)."),
+    kubeconfig: str | None = typer.Option(
+        None, "--kubeconfig", help="Path to kubeconfig (default: KUBECONFIG env or ~/.kube/config)."
+    ),
+    parallel: int = typer.Option(8, "--parallel", "-j", min=1, max=64, help="Concurrent analyzer workers."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Write fleet report JSON to this path; default stdout."
+    ),
+) -> None:
+    """Scan every running pod in the target cluster and emit a fleet report."""
+    from cepheus.fleet import FleetScanError, scan_cluster  # noqa: PLC0415
+
+    try:
+        report = scan_cluster(
+            namespace=namespace,
+            selector=selector,
+            context=context,
+            kubeconfig=kubeconfig,
+            parallel=parallel,
+        )
+    except FleetScanError as exc:
+        console.print(f"[red]Fleet scan failed: {exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    payload = json.dumps(report.to_dict(), indent=2)
+    if output:
+        _validate_output_path(output)
+        Path(output).write_text(payload, encoding="utf-8")
+        crit = sum(p.critical_chain_count for p in report.pods)
+        console.print(
+            f"[green]Fleet report written to {output}[/green] "
+            f"(pods={report.pod_count}, errors={report.error_count}, critical chains={crit})"
+        )
+    else:
+        # print() not console.print() — keeps the JSON parseable when
+        # the user pipes the output (`cepheus fleet scan | jq ...`).
+        print(payload)  # noqa: T201
+
+
+@fleet_app.command("diff")
+def fleet_diff(
+    before: Path = typer.Argument(..., help="Earlier fleet-report JSON."),
+    after: Path = typer.Argument(..., help="Later fleet-report JSON."),
+    fail_on_regression: bool = typer.Option(
+        False,
+        "--fail-on-regression",
+        help="Exit non-zero when any pod regressed (new chains, higher score) — useful in CI.",
+    ),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write diff JSON to this path; default stdout."),
+) -> None:
+    """Compare two fleet reports and report the posture delta."""
+    from cepheus.fleet import diff_reports  # noqa: PLC0415
+
+    try:
+        before_data = json.loads(Path(before).read_text(encoding="utf-8"))
+        after_data = json.loads(Path(after).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Failed to load fleet reports: {exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    try:
+        diff_result = diff_reports(before_data, after_data)
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        console.print(f"[red]Failed to diff fleet reports (malformed report data): {exc}[/red]")
+        raise typer.Exit(2) from exc
+    payload = json.dumps(diff_result.to_dict(), indent=2)
+    if output:
+        _validate_output_path(output)
+        Path(output).write_text(payload, encoding="utf-8")
+        console.print(
+            f"[green]Fleet diff written to {output}[/green] "
+            f"(added={diff_result.pods_added}, removed={diff_result.pods_removed}, "
+            f"regressed={diff_result.pods_regressed}, improved={diff_result.pods_improved})"
+        )
+    else:
+        print(payload)  # noqa: T201
+
+    if fail_on_regression and diff_result.has_regressions:
+        raise typer.Exit(1)
+
+
+@app.command()
+def update(
+    check_only: bool = typer.Option(
+        True,
+        "--check/--no-check",
+        help="Check whether a newer release is available without applying it.",
+    ),
+    fail_if_outdated: bool = typer.Option(
+        False,
+        "--fail-if-outdated",
+        help="Exit non-zero when an upgrade is available (useful in CI).",
+    ),
+    api_url: str | None = typer.Option(
+        None,
+        "--api-url",
+        help="Override the GitHub releases endpoint (for testing / mirrors).",
+        hidden=True,
+    ),
+) -> None:
+    """Check whether a newer Cepheus release is available."""
+    from cepheus.updater import (  # noqa: PLC0415
+        UpdateCheckError,
+        fetch_latest_release,
+        is_newer,
+    )
+
+    try:
+        latest = fetch_latest_release(api_url or "https://api.github.com/repos/Su1ph3r/Cepheus/releases/latest")
+    except UpdateCheckError as exc:
+        console.print(f"[red]Update check failed: {exc}[/red]")
+        raise typer.Exit(2) from exc
+
+    if not is_newer(__version__, latest.tag):
+        console.print(f"[green]Cepheus {__version__} is up to date[/green] (latest published: {latest.tag})")
+        return
+
+    console.print(
+        f"[yellow]A newer release is available:[/yellow] "
+        f"{latest.tag} (you have {__version__}).\n"
+        f"  Release notes: {latest.html_url}\n"
+        f"  Upgrade paths:\n"
+        f"    pipx upgrade cepheus-engine\n"
+        f"    pip install --upgrade cepheus-engine\n"
+        f"    brew upgrade su1ph3r/tap/cepheus    # macOS\n"
+        f"    scoop update cepheus                # Windows\n"
+        f"    docker pull ghcr.io/su1ph3r/cepheus:{latest.tag.lstrip('v')}"
+    )
+
+    if not check_only:
+        console.print(
+            "[yellow]Note:[/yellow] in-place self-upgrade is not implemented — pick one of "
+            "the commands above. `--check` is the only supported mode today."
+        )
+
+    if fail_if_outdated:
+        raise typer.Exit(1)
 
 
 @app.command()
