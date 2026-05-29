@@ -162,15 +162,19 @@ def _run_analysis(
 
     if llm:
         try:
-            from cepheus.llm.client import LLMClient
+            from cepheus.llm.client import LLMClient, is_unavailable_marker
 
             client = LLMClient(config)
             result.llm_analysis = client.analyze_posture_sync(posture, result.chains)
+            if is_unavailable_marker(result.llm_analysis):
+                # The client degrades gracefully (the report still renders),
+                # but surface the failure so it isn't a silent exit-0 success.
+                console.print(f"[yellow]Warning: {result.llm_analysis}[/yellow]")
             # Stash the client on the result so a later
             # `_run_executive_summary` can reuse the same auth.
             result._llm_client = client  # noqa: SLF001 — internal stash, not serialized
         except ImportError:
-            console.print("[yellow]Warning: LLM extra not installed. Run: pip install cepheus[llm][/yellow]")
+            console.print("[yellow]Warning: LLM extra not installed. Run: pip install 'cepheus-engine\\[llm]'[/yellow]")
         except (AttributeError, TypeError):
             # Programming bugs (renamed method, wrong signature) must NOT
             # be swallowed as "LLM failed" warnings — they need to be
@@ -198,7 +202,11 @@ def _run_executive_summary(result: Any, *, llm: bool) -> None:
     if client is None:
         return
     try:
+        from cepheus.llm.client import is_unavailable_marker
+
         result.executive_summary = client.summarize_sync(result)
+        if is_unavailable_marker(result.executive_summary):
+            console.print(f"[yellow]Warning: {result.executive_summary}[/yellow]")
     except (AttributeError, TypeError):
         raise
     except Exception as exc:
@@ -277,7 +285,9 @@ def _render_output(
             else:
                 console.print(generate_html(result))
         except ImportError:
-            console.print("[red]Error: jinja2 is required for HTML reports. Run: pip install cepheus[html][/red]")
+            console.print(
+                "[red]Error: jinja2 is required for HTML reports. Run: pip install 'cepheus-engine\\[html]'[/red]"
+            )
             raise typer.Exit(1)
     elif format == OutputFormat.sarif:
         from cepheus.output.sarif import generate_sarif, write_sarif
@@ -1014,6 +1024,15 @@ def admission_server(
         "--key-file",
         help="Path to the PEM-encoded private key.",
     ),
+    client_ca: Path | None = typer.Option(
+        None,
+        "--client-ca",
+        help=(
+            "Optional PEM CA bundle. When set, require + verify a client certificate (mTLS) on "
+            "the TLS port so only the kube-apiserver (cert signed by this CA) can reach /validate. "
+            "Default: server-only TLS."
+        ),
+    ),
     bind_addr: str = typer.Option(
         "0.0.0.0",  # noqa: S104 — webhook must accept connections from kube-apiserver
         "--bind",
@@ -1092,6 +1111,16 @@ def admission_server(
             "PagerDuty Events API v2 routing key. When set, every admission DENY "
             "triggers a `severity=error` PagerDuty event; WARN-mode events use "
             "`severity=warning` so they don't page on-call by default."
+        ),
+    ),
+    webhook_url: str | None = typer.Option(
+        None,
+        "--webhook-url",
+        envvar="CEPHEUS_WEBHOOK_URL",
+        help=(
+            "Generic webhook URL. When set, every admission DENY (and WARN-mode "
+            "near-deny) is POSTed as flat JSON to this endpoint. Best-effort, "
+            "rate-limited, non-blocking. Prefer the env var or a Kubernetes Secret."
         ),
     ),
     fail_open: bool = typer.Option(
@@ -1174,6 +1203,7 @@ def admission_server(
     notifier_cfg = NotifierConfig(
         slack_webhook_url=slack_webhook_url or None,
         pagerduty_routing_key=pagerduty_routing_key or None,
+        webhook_url=webhook_url or None,
     )
 
     try:
@@ -1203,6 +1233,9 @@ def admission_server(
         if not key_file.exists():
             console.print(f"[red]Error: --key-file not found: {key_file}[/red]")
             raise typer.Exit(2)
+        if client_ca is not None and not client_ca.exists():
+            console.print(f"[red]Error: --client-ca not found: {client_ca}[/red]")
+            raise typer.Exit(2)
 
         serve(
             cfg,
@@ -1211,6 +1244,7 @@ def admission_server(
             cert_file=cert_file,
             key_file=key_file,
             health_port=health_port if health_port > 0 else None,
+            client_ca=client_ca,
         )
     finally:
         if node_cache is not None:
@@ -1317,7 +1351,12 @@ def update(
     check_only: bool = typer.Option(
         True,
         "--check/--no-check",
-        help="Check whether a newer release is available without applying it.",
+        help="Check only (default). `--no-check` is an alias for `--apply`.",
+    ),
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="When an upgrade is available, run the detected package manager to upgrade in place (with confirmation).",
     ),
     fail_if_outdated: bool = typer.Option(
         False,
@@ -1331,11 +1370,13 @@ def update(
         hidden=True,
     ),
 ) -> None:
-    """Check whether a newer Cepheus release is available."""
+    """Check whether a newer Cepheus release is available (and optionally apply it)."""
     from cepheus.updater import (  # noqa: PLC0415
         UpdateCheckError,
+        detect_install_method,
         fetch_latest_release,
         is_newer,
+        upgrade_command,
     )
 
     try:
@@ -1360,14 +1401,134 @@ def update(
         f"    docker pull ghcr.io/su1ph3r/cepheus:{latest.tag.lstrip('v')}"
     )
 
-    if not check_only:
-        console.print(
-            "[yellow]Note:[/yellow] in-place self-upgrade is not implemented — pick one of "
-            "the commands above. `--check` is the only supported mode today."
-        )
+    # `--no-check` is the legacy way to request an upgrade; treat it as `--apply`.
+    if apply or not check_only:
+        method = detect_install_method()
+        cmd = upgrade_command(method)
+        if cmd is None:
+            console.print(
+                f"[yellow]Detected install method: {method}.[/yellow] In-place self-upgrade isn't "
+                "possible for this install type — use one of the commands above."
+            )
+        else:
+            console.print(f"[cyan]Detected install method: {method}[/cyan] — would run: [bold]{' '.join(cmd)}[/bold]")
+            if typer.confirm("Run the upgrade now?", default=False):
+                import subprocess  # noqa: PLC0415
+
+                try:
+                    proc = subprocess.run(cmd, check=False)
+                except OSError as exc:
+                    console.print(f"[red]Upgrade command failed to launch: {exc}[/red]")
+                    raise typer.Exit(2) from exc
+                if proc.returncode != 0:
+                    console.print(f"[red]Upgrade command exited {proc.returncode}.[/red]")
+                    raise typer.Exit(proc.returncode)
+                console.print("[green]Upgrade complete — run `cepheus --version` to confirm.[/green]")
+                return
+            console.print("[yellow]Upgrade cancelled.[/yellow]")
 
     if fail_if_outdated:
         raise typer.Exit(1)
+
+
+@app.command()
+def notify(
+    namespace: str = typer.Option(..., "--namespace", "-n", help="Pod namespace."),
+    pod: str = typer.Option(..., "--pod", "-p", help="Pod name."),
+    decision: str = typer.Option("DENY", "--decision", help="Event decision: DENY or WARN."),
+    reason: str = typer.Option("", "--reason", help="Human-readable reason for the event."),
+    chain_count: int = typer.Option(0, "--chain-count", min=0, help="Number of escape chains detected."),
+    uid: str = typer.Option("manual", "--uid", help="Event UID (used for PagerDuty dedup)."),
+    slack_webhook_url: str | None = typer.Option(
+        None, "--slack-webhook-url", envvar="CEPHEUS_SLACK_WEBHOOK_URL", help="Slack incoming-webhook URL."
+    ),
+    pagerduty_routing_key: str | None = typer.Option(
+        None, "--pagerduty-routing-key", envvar="CEPHEUS_PAGERDUTY_ROUTING_KEY", help="PagerDuty Events API v2 key."
+    ),
+    webhook_url: str | None = typer.Option(
+        None, "--webhook-url", envvar="CEPHEUS_WEBHOOK_URL", help="Generic JSON webhook URL."
+    ),
+) -> None:
+    """Send a one-off notification through the configured channels.
+
+    Useful for verifying notifier configuration, or for scripting alerts
+    from a `cepheus ci` / `cepheus analyze` pipeline outside the admission
+    webhook. At least one channel must be configured.
+    """
+    import logging as _logging  # noqa: PLC0415
+    import threading as _threading  # noqa: PLC0415
+
+    from cepheus.server.notifiers import (  # noqa: PLC0415
+        AdmissionEvent,
+        NotifierConfig,
+    )
+    from cepheus.server.notifiers import (  # noqa: PLC0415
+        notify as _dispatch,
+    )
+
+    decision_norm = decision.upper()
+    if decision_norm not in ("DENY", "WARN"):
+        console.print("[red]--decision must be DENY or WARN[/red]")
+        raise typer.Exit(2)
+
+    cfg = NotifierConfig(
+        slack_webhook_url=slack_webhook_url or None,
+        pagerduty_routing_key=pagerduty_routing_key or None,
+        webhook_url=webhook_url or None,
+    )
+    if not cfg.any_enabled:
+        console.print(
+            "[red]No notification channel configured. Set at least one of "
+            "--slack-webhook-url / --pagerduty-routing-key / --webhook-url.[/red]"
+        )
+        raise typer.Exit(2)
+
+    # notify() POSTs best-effort on daemon threads and only *logs* failures
+    # — invisible in a one-shot CLI. For this verification command, capture
+    # those warnings so a delivery failure is surfaced (and exits non-zero)
+    # rather than presenting a misleading success.
+    delivery_problems: list[str] = []
+
+    class _CaptureHandler(_logging.Handler):
+        def emit(self, record: _logging.LogRecord) -> None:
+            if record.levelno >= _logging.WARNING:
+                delivery_problems.append(record.getMessage())
+
+    nlog = _logging.getLogger("cepheus.notifiers")
+    capture = _CaptureHandler()
+    prev_level = nlog.level
+    nlog.addHandler(capture)
+    nlog.setLevel(_logging.WARNING)
+    try:
+        _dispatch(
+            AdmissionEvent(
+                decision=decision_norm,
+                namespace=namespace,
+                pod_name=pod,
+                reason=reason,
+                uid=uid,
+                chain_count=chain_count,
+            ),
+            cfg,
+        )
+        # notify() POSTs on daemon threads, which die when this one-shot CLI
+        # process exits — join them so the POSTs actually complete first.
+        for t in _threading.enumerate():
+            if t.name.startswith("cepheus-notify-"):
+                t.join(timeout=6.0)
+    finally:
+        nlog.removeHandler(capture)
+        nlog.setLevel(prev_level)
+
+    if delivery_problems:
+        for msg in delivery_problems:
+            console.print(f"[red]delivery problem:[/red] {msg}")
+        console.print(
+            f"[yellow]Dispatched {decision_norm} for {namespace}/{pod}, but at least one channel "
+            f"reported a delivery error (see above).[/yellow]"
+        )
+        raise typer.Exit(1)
+    console.print(f"[green]Dispatched {decision_norm} notification for {namespace}/{pod} (best-effort).[/green]")
 
 
 @app.command()

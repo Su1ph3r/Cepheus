@@ -557,6 +557,22 @@ class AdmissionHandler(BaseHTTPRequestHandler):
         self._reply(status, json.dumps(payload).encode("utf-8") + b"\n")
 
 
+class HealthHandler(AdmissionHandler):
+    """Handler for the plaintext kubelet-probe port. Serves ONLY the GET
+    /healthz and /readyz probes (inherited); /validate is explicitly not
+    exposed here.
+
+    The admission endpoint must be reachable only over the (optionally
+    mTLS-gated) TLS port. If the shared AdmissionHandler were used on the
+    cleartext health port, an in-cluster caller could POST AdmissionReview
+    bodies to /validate over plain HTTP and bypass the mTLS control the
+    operator opted into via --client-ca.
+    """
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._reply(HTTPStatus.NOT_FOUND, b'{"error":"not found"}\n')
+
+
 def serve(
     cfg: AdmissionConfig,
     *,
@@ -565,6 +581,7 @@ def serve(
     cert_file: str | Path,
     key_file: str | Path,
     health_port: int | None = 8080,
+    client_ca: str | Path | None = None,
 ) -> None:
     """Start the admission server. Blocks the calling thread.
 
@@ -586,6 +603,12 @@ def serve(
         key_file: Path to PEM-encoded private key.
         health_port: Optional plaintext HTTP port for ``/healthz`` and
             ``/readyz``. Pass ``None`` to disable.
+        client_ca: Optional PEM CA bundle. When set, the webhook requires
+            and verifies a client certificate (mTLS) on the TLS port, so
+            only callers presenting a cert signed by this CA (the
+            kube-apiserver) can reach ``/validate``. Default ``None``
+            keeps server-only TLS. The plaintext health port is never
+            mTLS-gated — kubelet probes are unauthenticated.
     """
     server = ThreadingHTTPServer((bind_addr, port), AdmissionHandler)
     server.cepheus_config = cfg  # type: ignore[attr-defined]
@@ -594,12 +617,18 @@ def serve(
     ctx.load_cert_chain(certfile=str(cert_file), keyfile=str(key_file))
     # TLS 1.2 minimum — kube-apiserver supports 1.2+ since k8s 1.10.
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    if client_ca is not None:
+        # mTLS: require + verify a client cert signed by the apiserver CA,
+        # so only the kube-apiserver can reach /validate over this socket.
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations(cafile=str(client_ca))
+        logger.info("admission webhook requiring client certificate (mTLS) verified against %s", client_ca)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
 
     health_thread: threading.Thread | None = None
     health_server: ThreadingHTTPServer | None = None
     if health_port is not None:
-        health_server = ThreadingHTTPServer((bind_addr, health_port), AdmissionHandler)
+        health_server = ThreadingHTTPServer((bind_addr, health_port), HealthHandler)
         health_server.cepheus_config = cfg  # type: ignore[attr-defined]
         # Health server intentionally NOT TLS — kubelet probes default to plain HTTP.
 

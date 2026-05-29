@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from cepheus.config import CepheusConfig
@@ -70,12 +71,13 @@ def _generate_remediations(
         # "<flag> ..." shape without misreading prose.
         runtime_flag = technique.cli_flag
         if runtime_flag is None and technique.remediation:
-            # `.split()[0]` raises IndexError on whitespace-only strings
-            # (e.g. "   " is truthy but split returns []), so call split
-            # then check the result instead of subscripting blind.
-            parts = technique.remediation.split(maxsplit=1)
-            if parts and parts[0].startswith("--"):
-                runtime_flag = parts[0].rstrip(",.")
+            # Mine a leading CLI flag from the remediation text only when it
+            # is a genuine flag-shaped token (`--flag` or `--flag=value`) at
+            # the very start. The strict regex avoids both prose that merely
+            # starts with an ASCII "--" run and Unicode-dash look-alikes.
+            m = re.match(r"^(--[A-Za-z0-9][A-Za-z0-9-]*(?:=\S+)?)", technique.remediation)
+            if m:
+                runtime_flag = m.group(1)
 
         items.append(
             RemediationItem(

@@ -1,200 +1,647 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<title>Cepheus &mdash; SARIF viewer</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<!--
-  Self-contained static viewer for Cepheus SARIF reports.
-
-  All dynamic content from the loaded SARIF file is inserted via the
-  DOM API (createElement + textContent + appendChild) rather than
-  innerHTML. The SARIF blob is user-supplied untrusted input; mixing
-  it into innerHTML with a hand-rolled escape function is one of the
-  classic web-app XSS footguns. Avoiding innerHTML entirely is both
-  simpler and safer than reviewing every interpolation site.
-
-  The SVG chain view uses createElementNS for the SVG namespace —
-  document.createElement("svg") creates an HTML <svg> element which
-  most browsers will render but with subtly different behaviour
-  (CSS sizing, viewBox handling).
--->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cepheus — SARIF Explorer</title>
 <style>
-  :root {
-    --bg: #0f1115;
-    --bg-elev: #161a22;
-    --bg-elev-2: #1d2230;
-    --fg: #e6e8eb;
-    --fg-dim: #9aa3b2;
-    --border: #2a3142;
-    --accent: #6ea8fe;
-    --critical: #ff4d4f;
-    --high: #ff9f43;
-    --medium: #fad776;
-    --low: #62a877;
-    --link: #79b8ff;
-  }
-  *, *::before, *::after { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  header {
-    padding: 20px 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    background: var(--bg-elev);
-  }
-  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-  header .subtitle { color: var(--fg-dim); font-size: 13px; }
-  main { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 64px); }
-  .left, .right { overflow: auto; padding: 20px 28px; }
-  .left { border-right: 1px solid var(--border); }
-  .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: 12px;
-    padding: 40px;
-    text-align: center;
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition: border-color 120ms ease, background 120ms ease;
-  }
-  .drop-zone:hover, .drop-zone.dragover {
-    border-color: var(--accent);
-    background: var(--bg-elev);
-  }
-  .drop-zone strong { color: var(--fg); display: block; margin-bottom: 8px; }
-  .drop-zone .hint { font-size: 12px; margin-top: 12px; }
-  .summary {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .stat {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-  }
-  .stat .label { color: var(--fg-dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .stat .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
-  .stat.crit .value { color: var(--critical); }
-  .stat.high .value { color: var(--high); }
-  .stat.med .value { color: var(--medium); }
-  .stat.low .value { color: var(--low); }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
-  th {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--fg-dim);
-    background: var(--bg);
-    position: sticky;
-    top: 0;
-  }
-  tr.result-row { cursor: pointer; transition: background 80ms ease; }
-  tr.result-row:hover { background: var(--bg-elev); }
-  tr.result-row.selected { background: var(--bg-elev-2); }
-  .severity {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-  .severity.critical { background: rgba(255, 77, 79, 0.18); color: var(--critical); }
-  .severity.high { background: rgba(255, 159, 67, 0.18); color: var(--high); }
-  .severity.medium, .severity.warning { background: rgba(250, 215, 118, 0.18); color: var(--medium); }
-  .severity.low, .severity.note { background: rgba(98, 168, 119, 0.18); color: var(--low); }
-  .severity.none { background: rgba(154, 163, 178, 0.18); color: var(--fg-dim); }
-  .chain-view h3 { margin: 0 0 6px 0; font-size: 14px; }
-  .chain-view .meta { color: var(--fg-dim); font-size: 12px; margin-bottom: 16px; }
-  .chain-view .empty { text-align: center; padding: 60px 20px; color: var(--fg-dim); }
-  .chain-svg { width: 100%; height: auto; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: block; }
-  .chain-detail dl { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; margin-top: 14px; }
-  .chain-detail dt { color: var(--fg-dim); font-size: 12px; }
-  .chain-detail dd { margin: 0; word-break: break-word; }
-  .chain-detail a { color: var(--link); }
-  details.poc { margin-top: 14px; background: var(--bg-elev); border-radius: 8px; padding: 10px 12px; border: 1px solid var(--border); }
-  details.poc summary { cursor: pointer; color: var(--fg-dim); font-size: 12px; }
-  details.poc pre { margin: 10px 0 0 0; white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--fg); }
-  .filename {
-    color: var(--fg-dim);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 12px;
-  }
-  .button {
-    background: var(--bg-elev-2);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    padding: 6px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-  .button:hover { border-color: var(--accent); }
-  .toolbar { display: flex; gap: 8px; align-items: center; }
-  .toolbar input[type="search"] {
-    flex: 1;
-    background: var(--bg);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 13px;
-  }
-  .toolbar select {
-    background: var(--bg);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 13px;
-  }
+/* ============================================================================
+   CEPHEUS · SARIF Explorer
+   Offline forensic viewer for container-escape findings.
+   Identity: "star-chart forensics" — monospace instrument chrome, calibrated
+   deep-slate dark theme, severity palette owns all color, one cool accent.
+   No web fonts, no CDN, no network. System stacks only.
+   ============================================================================ */
+
+/* ---------- Theme tokens ---------- */
+:root {
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", "Cascadia Mono",
+               "Segoe UI Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+               Arial, sans-serif;
+
+  --r-xs: 3px; --r-sm: 5px; --r-md: 8px; --r-lg: 12px; --r-full: 999px;
+
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px;
+
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --header-h: 60px;
+}
+
+/* DARK (default) — deep, cool, instrument-panel */
+html[data-theme="dark"] {
+  --bg: #0a0d14;
+  --bg-grid: rgba(120, 145, 190, 0.045);
+  --surface: #11151f;
+  --surface-2: #161b27;
+  --surface-3: #1c2230;
+  --surface-hover: #1a2030;
+  --border: #232a3a;
+  --border-2: #2b3346;
+  --border-strong: #36405a;
+  --text: #e7ecf6;
+  --text-2: #9aa6bd;
+  --text-3: #66728c;
+  --text-faint: #4a5469;
+
+  --accent: #4cd6e8;          /* cool cyan — chrome / focus / selection only */
+  --accent-bg: rgba(76, 214, 232, 0.12);
+  --accent-line: rgba(76, 214, 232, 0.30);
+
+  --crit: #ff7a85;   --crit-bg: rgba(255, 90, 100, 0.13);  --crit-line: rgba(255, 90, 100, 0.34);
+  --high: #ffae57;   --high-bg: rgba(255, 150, 60, 0.13);  --high-line: rgba(255, 150, 60, 0.32);
+  --med:  #ffd24a;   --med-bg:  rgba(255, 200, 50, 0.12);  --med-line:  rgba(255, 200, 50, 0.30);
+  --low:  #5db4ff;   --low-bg:  rgba(70, 150, 255, 0.13);  --low-line:  rgba(70, 150, 255, 0.32);
+  --info: #94a0b8;   --info-bg: rgba(148, 160, 184, 0.12); --info-line: rgba(148, 160, 184, 0.28);
+
+  --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --node-glow: 0 0 0 4px;
+
+  /* deep-space atmosphere */
+  --app-bg: radial-gradient(ellipse 130% 90% at 50% -25%, #16203a 0%, #0b101c 48%, #05070d 100%);
+  --sky-bg: radial-gradient(ellipse 70% 130% at 18% -10%, rgba(76,214,232,0.10), transparent 55%),
+            radial-gradient(ellipse 80% 120% at 92% 115%, rgba(124,90,237,0.10), transparent 55%),
+            linear-gradient(170deg, #0b1426 0%, #070b15 100%);
+  --sky-frame: rgba(120,170,220,0.16);
+  --sky-grid: rgba(120,160,220,0.07);
+  --sky-star: rgba(220,235,255,0.85);
+  --sky-tick: rgba(150,180,220,0.45);
+  --sky-inset: inset 0 0 60px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+  --sky-solid: #0a1120;
+}
+
+/* LIGHT — cool paper, forensic but bright */
+html[data-theme="light"] {
+  --bg: #eef1f7;
+  --bg-grid: rgba(40, 60, 110, 0.05);
+  --surface: #ffffff;
+  --surface-2: #f6f8fc;
+  --surface-3: #eef1f7;
+  --surface-hover: #f0f3f9;
+  --border: #d8deea;
+  --border-2: #cdd5e4;
+  --border-strong: #b3bdd2;
+  --text: #131a27;
+  --text-2: #475068;
+  --text-3: #717c95;
+  --text-faint: #95a0b6;
+
+  --accent: #0b8ba3;
+  --accent-bg: rgba(11, 139, 163, 0.10);
+  --accent-line: rgba(11, 139, 163, 0.35);
+
+  --crit: #cf2331;   --crit-bg: rgba(207, 35, 49, 0.09);   --crit-line: rgba(207, 35, 49, 0.30);
+  --high: #c05a07;   --high-bg: rgba(192, 90, 7, 0.10);    --high-line: rgba(192, 90, 7, 0.28);
+  --med:  #97700a;   --med-bg:  rgba(151, 112, 10, 0.10);  --med-line:  rgba(151, 112, 10, 0.28);
+  --low:  #1763cf;   --low-bg:  rgba(23, 99, 207, 0.09);   --low-line:  rgba(23, 99, 207, 0.30);
+  --info: #5a6478;   --info-bg: rgba(90, 100, 122, 0.10);  --info-line: rgba(90, 100, 122, 0.26);
+
+  --shadow: 0 14px 40px -16px rgba(20, 30, 60, 0.30), 0 2px 6px rgba(20, 30, 60, 0.08);
+  --node-glow: 0 0 0 4px;
+
+  /* pale star-chart / blueprint atmosphere */
+  --app-bg: radial-gradient(ellipse 130% 90% at 50% -25%, #ffffff 0%, #eef1f7 55%, #e3e8f2 100%);
+  --sky-bg: radial-gradient(ellipse 70% 130% at 18% -10%, rgba(11,139,163,0.07), transparent 55%),
+            radial-gradient(ellipse 80% 120% at 92% 115%, rgba(80,110,210,0.06), transparent 55%),
+            linear-gradient(170deg, #f8fafe 0%, #eaf0f9 100%);
+  --sky-frame: rgba(40,80,150,0.18);
+  --sky-grid: rgba(40,80,150,0.07);
+  --sky-star: rgba(40,70,130,0.40);
+  --sky-tick: rgba(40,80,150,0.40);
+  --sky-inset: inset 0 0 40px rgba(40,70,130,0.05), inset 0 1px 0 rgba(255,255,255,0.6);
+  --sky-solid: #f4f7fc;
+}
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font-sans);
+  background: var(--app-bg);
+  background-attachment: fixed;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+/* faint coordinate-grid atmosphere */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 52px 52px;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse 120% 90% at 50% 0%, #000 30%, transparent 95%);
+}
+
+.mono { font-family: var(--font-mono); }
+::selection { background: var(--accent-bg); color: var(--text); }
+
+/* scrollbars */
+.scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; border: 2px solid var(--bg); }
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ============================================================================
+   App frame
+   ============================================================================ */
+.app {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ---------- Header ---------- */
+.header {
+  flex: 0 0 var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: 0 var(--s-6);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+}
+.brand { display: flex; align-items: center; gap: var(--s-3); }
+.brand .mark { width: 30px; height: 30px; display: block; color: var(--accent); flex: 0 0 auto; }
+.brand .word {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.34em;
+  padding-left: 0.34em;
+  color: var(--text);
+}
+.brand .sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.26em;
+  color: var(--text-3);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.brand .lock { display: flex; flex-direction: column; line-height: 1.1; }
+
+.header .file-meta {
+  display: flex; align-items: center; gap: var(--s-3);
+  padding-left: var(--s-5);
+  margin-left: var(--s-2);
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+.header .file-meta[hidden] { display: none; }
+.file-meta .fname {
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+.file-meta .fcount {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-3);
+  border: 1px solid var(--border); border-radius: var(--r-full);
+  padding: 2px 9px; white-space: nowrap;
+}
+.header .spacer { flex: 1 1 auto; }
+
+/* offline seal */
+.seal {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  color: var(--text-3); text-transform: uppercase;
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--r-full);
+}
+.seal .pip { width: 6px; height: 6px; border-radius: 99px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+/* buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  padding: 8px 14px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text);
+  cursor: pointer; transition: all 140ms var(--ease); white-space: nowrap;
+}
+.btn:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.btn svg { width: 15px; height: 15px; }
+.btn-primary { background: var(--accent); color: #04222a; border-color: transparent; font-weight: 600; }
+html[data-theme="light"] .btn-primary { color: #fff; }
+.btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+.btn-icon { padding: 8px; }
+
+/* ============================================================================
+   Loader / empty state
+   ============================================================================ */
+.loader-view {
+  flex: 1 1 auto;
+  display: grid; place-items: center;
+  padding: var(--s-8);
+}
+.loader-view[hidden] { display: none; }
+.dropzone {
+  width: min(620px, 100%);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  padding: var(--s-12) var(--s-10);
+  text-align: center;
+  transition: all 180ms var(--ease);
+  position: relative;
+  overflow: hidden;
+}
+.dropzone.is-drag {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 6px var(--accent-bg);
+}
+.dropzone .constellation { width: 84px; height: 84px; margin: 0 auto var(--s-5); color: var(--accent); }
+.dropzone h1 {
+  font-family: var(--font-sans); font-weight: 650; font-size: 23px; margin: 0 0 var(--s-2);
+  letter-spacing: -0.01em;
+}
+.dropzone p { color: var(--text-2); margin: 0 auto var(--s-6); max-width: 42ch; font-size: 14px; }
+.dropzone .or { display: block; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-faint); margin: var(--s-5) 0 var(--s-3); }
+.dropzone .hint { margin-top: var(--s-6); font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+.dropzone .hint code { color: var(--text-2); background: var(--surface-3); padding: 2px 6px; border-radius: var(--r-xs); }
+.dropzone .actions { display: flex; gap: var(--s-3); justify-content: center; }
+
+/* ============================================================================
+   Data view — two panes
+   ============================================================================ */
+.data-view { flex: 1 1 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(440px, 540px); grid-template-rows: minmax(0, 1fr); min-height: 0; }
+.data-view[hidden] { display: none; }
+@media (max-width: 1080px) { .data-view { grid-template-columns: minmax(0, 1fr) minmax(380px, 440px); } }
+
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.pane-list { border-right: 1px solid var(--border); }
+
+/* ---------- Stats strip ---------- */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.stat {
+  background: var(--surface);
+  padding: var(--s-4) var(--s-5);
+  display: flex; flex-direction: column; gap: 5px;
+  cursor: pointer; transition: background 140ms var(--ease);
+  position: relative; border: none; text-align: left; font: inherit; color: inherit;
+}
+.stat::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); opacity: 0.85; }
+.stat:hover { background: var(--surface-2); }
+.stat.is-active { background: var(--surface-2); }
+.stat.is-active::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--c); pointer-events: none; }
+.stat .n { font-family: var(--font-mono); font-size: 28px; font-weight: 600; line-height: 1; color: var(--text); letter-spacing: -0.02em; }
+.stat .l { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--c); display: flex; align-items: center; gap: 7px; }
+.stat .l .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--c); }
+.stat-crit { --c: var(--crit); } .stat-high { --c: var(--high); } .stat-med { --c: var(--med); } .stat-low { --c: var(--low); }
+
+/* ---------- Toolbar ---------- */
+.toolbar { flex: 0 0 auto; display: flex; gap: var(--s-3); padding: var(--s-3) var(--s-5); border-bottom: 1px solid var(--border); background: var(--surface); align-items: center; }
+.search { position: relative; flex: 1 1 auto; }
+.search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-3); pointer-events: none; }
+.input, .select {
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+  padding: 8px 12px; transition: all 140ms var(--ease);
+}
+.input { width: 100%; padding-left: 34px; }
+.input::placeholder { color: var(--text-faint); }
+.input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); background: var(--surface); }
+.select { cursor: pointer; padding-right: 30px; appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2366728c' stroke-width='2.4' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat; background-position: right 9px center;
+}
+
+/* ---------- Results table ---------- */
+.table-wrap { flex: 1 1 auto; overflow: auto; min-height: 0; }
+table#results-table { width: 100%; border-collapse: collapse; }
+#results-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-2);
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--text-3); font-weight: 500; text-align: left;
+  padding: 9px var(--s-4); border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+#results-table thead th.th-score { text-align: right; }
+#results-tbody tr {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 110ms var(--ease);
+}
+#results-tbody tr:hover { background: var(--surface-2); }
+#results-tbody tr.is-selected { background: var(--accent-bg); box-shadow: inset 0 0 22px -6px color-mix(in srgb, var(--accent) 40%, transparent); }
+#results-tbody tr.is-selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+#results-tbody tr.is-selected .cell-rule-title { color: var(--accent); }
+#results-tbody td { padding: 11px var(--s-4); vertical-align: middle; }
+#results-tbody td.c-rule { width: 99%; }
+.cell-rule-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); letter-spacing: 0.02em; }
+.cell-rule-title { font-size: 13.5px; color: var(--text); font-weight: 550; margin-top: 1px; line-height: 1.3; }
+.cell-chain { display: flex; align-items: center; gap: 5px; margin-top: 6px; flex-wrap: wrap; }
+.chip {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.02em;
+  color: var(--text-2); background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--r-xs);
+  padding: 2px 6px; white-space: nowrap;
+}
+.cell-chain .arrow { color: var(--text-faint); font-size: 10px; }
+.cell-chain .more { color: var(--text-3); font-family: var(--font-mono); font-size: 10px; }
+
+/* score cell */
+.score-cell { text-align: right; white-space: nowrap; }
+.score-num { font-family: var(--font-mono); font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.score-bar { width: 56px; height: 4px; border-radius: 99px; background: var(--surface-3); margin-top: 5px; margin-left: auto; overflow: hidden; }
+.score-bar > i { display: block; height: 100%; border-radius: 99px; background: var(--c, var(--accent)); }
+
+/* severity pill */
+.sev {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 9px 3px 8px; border-radius: var(--r-full);
+  background: var(--c-bg); color: var(--c); border: 1px solid var(--c-line); white-space: nowrap;
+}
+.sev .dot { width: 6px; height: 6px; border-radius: 99px; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.sev-critical { --c: var(--crit); --c-bg: var(--crit-bg); --c-line: var(--crit-line); }
+.sev-high { --c: var(--high); --c-bg: var(--high-bg); --c-line: var(--high-line); }
+.sev-medium { --c: var(--med); --c-bg: var(--med-bg); --c-line: var(--med-line); }
+.sev-low { --c: var(--low); --c-bg: var(--low-bg); --c-line: var(--low-line); }
+.sev-info { --c: var(--info); --c-bg: var(--info-bg); --c-line: var(--info-line); }
+
+/* empty-state (no results match) */
+#empty-state { padding: var(--s-12) var(--s-6); text-align: center; color: var(--text-3); font-family: var(--font-mono); font-size: 12.5px; }
+#empty-state[hidden] { display: none; }
+#empty-state svg { width: 40px; height: 40px; margin: 0 auto var(--s-3); color: var(--text-faint); display: block; }
+
+/* ============================================================================
+   Detail pane
+   ============================================================================ */
+.pane-detail { background: var(--surface); }
+#detail-empty { flex: 1 1 auto; display: grid; place-items: center; padding: var(--s-10); text-align: center; }
+#detail-empty .inner { max-width: 30ch; }
+#detail-empty svg { width: 56px; height: 56px; color: var(--text-faint); margin-bottom: var(--s-4); }
+#detail-empty p { color: var(--text-3); font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.02em; }
+#detail-empty[hidden] { display: none; }
+
+#detail { flex: 1 1 auto; overflow: auto; min-height: 0; }
+#detail[hidden] { display: none; }
+
+.d-head { padding: var(--s-6) var(--s-6) var(--s-5); border-bottom: 1px solid var(--border); }
+.d-head .top { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.d-head .rule-id { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); letter-spacing: 0.04em; }
+.d-head .title { font-family: var(--font-sans); font-size: 22px; font-weight: 650; line-height: 1.18; letter-spacing: -0.015em; margin: var(--s-3) 0 0; color: var(--text); text-wrap: pretty; }
+
+/* hero score — glowing instrument readout */
+.score-hero { display: flex; align-items: flex-end; gap: var(--s-6); margin-top: var(--s-5); }
+.score-hero .big { display: flex; flex-direction: column; gap: 4px; position: relative; }
+.score-hero .big .val { font-family: var(--font-mono); font-size: 62px; font-weight: 600; line-height: 0.84; letter-spacing: -0.045em; color: var(--c, var(--text)); text-shadow: 0 0 32px color-mix(in srgb, var(--c, #fff) 42%, transparent); font-variant-numeric: tabular-nums; }
+.score-hero .big .cap { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-3); }
+.score-hero .meta-cols { display: flex; gap: var(--s-6); padding-bottom: 8px; }
+.score-hero .mc { display: flex; flex-direction: column; gap: 3px; }
+.score-hero .mc .k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+.score-hero .mc .v { font-family: var(--font-mono); font-size: 13px; color: var(--text); }
+
+/* magnitude gauge under the head */
+.mag { margin-top: var(--s-5); }
+.mag .scale { position: relative; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.mag .scale > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 99px; background: linear-gradient(90deg, color-mix(in srgb, var(--c) 28%, transparent), var(--c)); box-shadow: 0 0 14px color-mix(in srgb, var(--c) 70%, transparent); transition: width 700ms var(--ease); }
+.mag .ticks { display: flex; justify-content: space-between; margin-top: 6px; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.12em; color: var(--text-faint); }
+
+/* chain visualizer — star-map window */
+.chain-block { padding: var(--s-5) var(--s-6) var(--s-6); border-bottom: 1px solid var(--border); }
+.chain-block .chain-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: var(--s-3); }
+.sky {
+  position: relative; border-radius: var(--r-lg);
+  background: var(--sky-bg); border: 1px solid var(--sky-frame);
+  box-shadow: var(--sky-inset); overflow: hidden;
+}
+.sky::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.7;
+  background-image:
+    linear-gradient(var(--sky-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--sky-grid) 1px, transparent 1px);
+  background-size: 30px 30px;
+  mask-image: radial-gradient(ellipse 110% 110% at 50% 50%, #000 55%, transparent 100%);
+}
+.sky .corner {
+  position: absolute; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.16em;
+  color: var(--sky-tick); pointer-events: none; z-index: 2; text-transform: uppercase;
+}
+.sky .corner.tl { top: 9px; left: 12px; } .sky .corner.tr { top: 9px; right: 12px; }
+.sky .corner.bl { bottom: 9px; left: 12px; } .sky .corner.br { bottom: 9px; right: 12px; }
+.chain-scroll { position: relative; overflow-x: auto; overflow-y: hidden; }
+#chain-view { display: block; }
+#chain-view text { font-family: var(--font-mono); }
+
+/* section label */
+.sec-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-3); margin-bottom: var(--s-2); display: flex; align-items: center; gap: 8px; }
+.sec-label .ix { color: var(--text-faint); }
+
+.d-body { padding: var(--s-6); display: flex; flex-direction: column; gap: var(--s-6); }
+.field p { margin: 0; }
+.field .impact-text { font-size: 16px; line-height: 1.45; color: var(--text); font-weight: 500; text-wrap: pretty; }
+.field .body-text { font-size: 13.5px; line-height: 1.6; color: var(--text-2); text-wrap: pretty; }
+
+/* recommendation callout */
+.reco {
+  border: 1px solid var(--accent-line); background: var(--accent-bg);
+  border-radius: var(--r-md); padding: var(--s-4) var(--s-4) var(--s-4) var(--s-5);
+  position: relative;
+}
+.reco::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--accent); }
+.reco .body-text { color: var(--text); }
+.reco code, .body-text code, .impact-text code {
+  font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--r-xs); padding: 1px 5px; color: var(--text);
+}
+
+/* affected components */
+.components { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.component {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+  padding: 5px 10px;
+}
+.component .sq { width: 6px; height: 6px; background: var(--text-3); border-radius: 1px; }
+
+/* sub-scores */
+.subscores { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-4); }
+.subscore { display: flex; flex-direction: column; gap: 7px; }
+.subscore .row { display: flex; align-items: baseline; justify-content: space-between; }
+.subscore .k { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.subscore .v { font-family: var(--font-mono); font-size: 14px; color: var(--text); font-weight: 600; }
+.gauge { height: 5px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.gauge > i { display: block; height: 100%; border-radius: 99px; background: var(--text-2); }
+
+/* compliance crosswalk */
+.crosswalk { display: flex; flex-direction: column; gap: var(--s-3); }
+.cw-row { display: grid; grid-template-columns: 168px 1fr; gap: var(--s-3); align-items: start; padding: var(--s-2) 0; border-top: 1px solid var(--border); }
+.cw-row:first-child { border-top: none; }
+.cw-row .fw { font-family: var(--font-mono); font-size: 11px; color: var(--text-2); line-height: 1.4; }
+.cw-row .fw small { display: block; color: var(--text-faint); font-size: 9.5px; letter-spacing: 0.08em; margin-top: 2px; }
+.cw-ids { display: flex; flex-wrap: wrap; gap: 5px; }
+.cw-id { font-family: var(--font-mono); font-size: 10.5px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-xs); padding: 2px 7px; }
+
+/* reference */
+.reference a {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+  text-decoration: none; border: 1px solid var(--accent-line); border-radius: var(--r-sm);
+  padding: 7px 12px; transition: all 140ms var(--ease); word-break: break-all;
+}
+.reference a:hover { background: var(--accent-bg); }
+.reference a svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.reference .inert { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); word-break: break-all; }
+
+.divider { height: 1px; background: var(--border); border: none; margin: 0; }
+
+/* ============================================================================
+   Motion — observatory feel (respects prefers-reduced-motion)
+   ============================================================================ */
+@keyframes cep-draw   { to { stroke-dashoffset: 0; } }
+@keyframes cep-pop    { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+@keyframes cep-rise   { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes cep-twinkle{ 0%, 100% { opacity: var(--tw-lo, 0.2); } 50% { opacity: var(--tw-hi, 0.9); } }
+@keyframes cep-float  { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-6px) rotate(1.5deg); } }
+@keyframes cep-fade   { from { opacity: 0; } to { opacity: 1; } }
+
+/* chain path draws itself in on (re)render */
+#chain-view .cep-path { stroke-dasharray: var(--len, 1000); stroke-dashoffset: var(--len, 1000); animation: cep-draw 1000ms var(--ease) 120ms forwards; }
+#chain-view .cep-node { transform-box: fill-box; transform-origin: center; opacity: 0; animation: cep-pop 460ms var(--ease) both; }
+#chain-view .cep-star { animation: cep-twinkle var(--tw-dur, 4s) ease-in-out infinite; }
+#chain-view .cep-label { opacity: 0; animation: cep-fade 500ms var(--ease) both; }
+
+/* findings rows stagger in */
+#results-tbody tr { animation: cep-rise 380ms var(--ease) both; }
+
+/* detail sections rise on select */
+#detail .d-head, #detail .chain-block, #detail .d-body > .field { animation: cep-rise 420ms var(--ease) both; }
+
+/* empty-state constellation drifts gently */
+.dropzone .constellation { animation: cep-float 9s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  #chain-view .cep-path { stroke-dashoffset: 0; animation: none; }
+  #chain-view .cep-node, #chain-view .cep-label,
+  #results-tbody tr, #detail .d-head, #detail .chain-block, #detail .d-body > .field { animation: none; opacity: 1; }
+  #chain-view .cep-star { animation: none; opacity: var(--tw-hi, 0.7); }
+  .dropzone .constellation { animation: none; }
+}
+
+[hidden] { display: none !important; }
 </style>
 </head>
 <body>
+<div class="app">
 
-<header>
-  <h1>Cepheus SARIF viewer</h1>
-  <div class="subtitle" id="file-info">No file loaded &mdash; drop a Cepheus SARIF report below.</div>
-  <div style="margin-left:auto">
-    <input type="file" id="file-input" accept=".sarif,.json" hidden>
-    <button class="button" id="open-button">Open file&hellip;</button>
-  </div>
-</header>
-
-<main>
-  <section class="left">
-    <div id="loader-view">
-      <div class="drop-zone" id="drop-zone">
-        <strong>Drop a Cepheus SARIF or JSON report here</strong>
-        Generated with <code>cepheus analyze &hellip; --format sarif --output report.sarif</code>
-        <div class="hint">Files never leave this page &mdash; all processing is in your browser.</div>
+  <!-- ============ HEADER ============ -->
+  <header class="header">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <!-- Cepheus constellation mark: the King's house outline in stars -->
+        <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.55">
+          <path d="M6 20 L11 7 L23 9 L26 21 L16 27 Z"/>
+        </g>
+        <g fill="currentColor">
+          <circle cx="6" cy="20" r="2.1"/>
+          <circle cx="11" cy="7" r="2.4"/>
+          <circle cx="23" cy="9" r="1.9"/>
+          <circle cx="26" cy="21" r="2.1"/>
+          <circle cx="16" cy="27" r="1.7"/>
+        </g>
+      </svg>
+      <div class="lock">
+        <span class="word">CEPHEUS</span>
+        <span class="sub">SARIF Explorer</span>
       </div>
     </div>
 
-    <div id="data-view" hidden>
-      <div class="summary">
-        <div class="stat crit"><div class="label">Critical</div><div class="value" id="count-crit">0</div></div>
-        <div class="stat high"><div class="label">High</div><div class="value" id="count-high">0</div></div>
-        <div class="stat med"><div class="label">Medium</div><div class="value" id="count-med">0</div></div>
-        <div class="stat low"><div class="label">Low / Note</div><div class="value" id="count-low">0</div></div>
+    <div class="file-meta" id="file-meta" hidden>
+      <span class="fname mono" id="file-name">—</span>
+      <span class="fcount" id="file-count">0 findings</span>
+    </div>
+
+    <span class="spacer"></span>
+
+    <span class="seal" title="All analysis runs in your browser. No data leaves this page.">
+      <span class="pip"></span> Offline · client-side only
+    </span>
+
+    <button class="btn" id="open-button" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/></svg>
+      Open file…
+    </button>
+
+    <button class="btn btn-icon" id="theme-toggle" type="button" title="Toggle theme" aria-label="Toggle light / dark theme">
+      <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      <svg id="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></svg>
+    </button>
+
+    <input type="file" id="file-input" accept=".sarif,.json,application/json" hidden>
+  </header>
+
+  <!-- ============ LOADER / EMPTY ============ -->
+  <div class="loader-view" id="loader-view">
+    <div class="dropzone" id="drop-zone">
+      <svg class="constellation" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+        <g stroke="currentColor" stroke-width="1" opacity="0.4" stroke-linecap="round">
+          <path d="M22 78 L40 26 L86 34 L100 80 L60 104 Z"/>
+          <path d="M40 26 L60 104 M86 34 L60 104 M22 78 L86 34"/>
+        </g>
+        <g fill="currentColor">
+          <circle cx="22" cy="78" r="3"/><circle cx="40" cy="26" r="4"/>
+          <circle cx="86" cy="34" r="3.4"/><circle cx="100" cy="80" r="3"/>
+          <circle cx="60" cy="104" r="2.6"/>
+          <circle cx="70" cy="58" r="1.6" opacity="0.6"/><circle cx="50" cy="64" r="1.4" opacity="0.5"/>
+        </g>
+      </svg>
+      <h1>Drop a Cepheus SARIF report</h1>
+      <p>Explore container-escape chains from <code class="mono">cepheus analyze --format sarif</code>. Everything is parsed and rendered locally — the report never leaves your browser.</p>
+      <div class="actions">
+        <button class="btn btn-primary" id="open-button-2" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/></svg>
+          Choose a report…
+        </button>
+        <button class="btn" id="load-sample" type="button">Load sample report</button>
+      </div>
+      <div class="hint">Accepts SARIF 2.1.0 · <code>.sarif</code> or <code>.json</code></div>
+      <p class="parse-error mono" id="parse-error" style="color:var(--crit);margin-top:16px;font-size:12px" hidden></p>
+    </div>
+  </div>
+
+  <!-- ============ DATA VIEW ============ -->
+  <div class="data-view" id="data-view" hidden>
+
+    <!-- LEFT: findings list -->
+    <section class="pane pane-list">
+      <div class="stats">
+        <button class="stat stat-crit" data-sev="critical" type="button">
+          <span class="n" id="count-crit">0</span>
+          <span class="l"><span class="dot"></span>Critical</span>
+        </button>
+        <button class="stat stat-high" data-sev="high" type="button">
+          <span class="n" id="count-high">0</span>
+          <span class="l"><span class="dot"></span>High</span>
+        </button>
+        <button class="stat stat-med" data-sev="medium" type="button">
+          <span class="n" id="count-med">0</span>
+          <span class="l"><span class="dot"></span>Medium</span>
+        </button>
+        <button class="stat stat-low" data-sev="low" type="button">
+          <span class="n" id="count-low">0</span>
+          <span class="l"><span class="dot"></span>Low</span>
+        </button>
       </div>
 
-      <div class="toolbar" style="margin-bottom: 12px;">
-        <input type="search" id="filter" placeholder="Filter by technique id, rule, or message&hellip;">
-        <select id="severity-filter">
-          <option value="">All severities</option>
+      <div class="toolbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input class="input" id="filter" type="search" placeholder="Search rule, technique, component, impact…" autocomplete="off" spellcheck="false">
+        </label>
+        <select class="select" id="severity-filter" aria-label="Filter by severity">
+          <option value="all">All severities</option>
           <option value="critical">Critical</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
@@ -202,383 +649,235 @@
         </select>
       </div>
 
-      <table id="results-table">
-        <thead><tr>
-          <th>Sev</th>
-          <th>Rule</th>
-          <th>Score</th>
-          <th>Techniques</th>
-        </tr></thead>
-        <tbody id="results-tbody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="right">
-    <div class="chain-view" id="chain-view">
-      <div class="empty" id="empty-state">
-        <p>Select a finding on the left to see its chain visualization.</p>
+      <div class="table-wrap scroll">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th class="th-sev">Severity</th>
+              <th class="th-rule">Rule · escape chain</th>
+              <th class="th-score">Score</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+        <div id="empty-state" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          No findings match your filters.
+        </div>
       </div>
-    </div>
-  </section>
-</main>
+    </section>
 
-<script>
-"use strict";
+    <!-- RIGHT: detail + chain -->
+    <section class="pane pane-detail">
+      <div id="detail-empty">
+        <div class="inner">
+          <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+            <g stroke="currentColor" stroke-width="1.3" opacity="0.5" stroke-linecap="round"><path d="M12 40 L22 14 L46 18 L52 42 L30 54 Z"/></g>
+            <g fill="currentColor"><circle cx="12" cy="40" r="2.4"/><circle cx="22" cy="14" r="2.8"/><circle cx="46" cy="18" r="2.4"/><circle cx="52" cy="42" r="2.4"/><circle cx="30" cy="54" r="2"/></g>
+          </svg>
+          <p>Select a finding to inspect its escape chain.</p>
+        </div>
+      </div>
+      <article id="detail" class="scroll" hidden></article>
+    </section>
 
-// ----- state ---------------------------------------------------------
-const state = {
-  sarif: null,
-  results: [],
-  filtered: [],
-  selectedIndex: -1,
-};
+  </div>
+</div>
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-// ----- DOM helpers (replace any innerHTML usage) ---------------------
-function el(tag, opts) {
-  const node = document.createElement(tag);
-  if (opts) {
-    if (opts.text !== undefined) node.textContent = opts.text;
-    if (opts.cls) node.className = opts.cls;
-    if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) node.setAttribute(k, v);
-  }
-  return node;
-}
-
-function svgEl(tag, attrs) {
-  const node = document.createElementNS(SVG_NS, tag);
-  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  return node;
-}
-
-function clearNode(node) {
-  while (node.firstChild) node.removeChild(node.firstChild);
-}
-
-// Coerce a SARIF property to a finite number, or null. The viewer opens
-// arbitrary, possibly third-party SARIF, so a numeric property may arrive
-// as a string/NaN/Infinity; calling .toFixed() on a non-number would
-// throw mid-render and blank the pane.
-function numOrNull(v) {
-  return typeof v === "number" && isFinite(v) ? v : null;
-}
-
-// ----- SARIF parsing -------------------------------------------------
-function parseSarif(blob) {
-  const runs = blob && Array.isArray(blob.runs) ? blob.runs : [];
-  if (!runs.length) throw new Error("No `runs` array present — is this a SARIF report?");
-  const run = runs[0];
-  const rules = ((run.tool && run.tool.driver && run.tool.driver.rules) || []).reduce((acc, r) => {
-    acc[r.id] = r;
-    return acc;
-  }, {});
-  const results = (run.results || []).map((r, i) => {
-    const props = r.properties || {};
-    return {
-      index: i,
-      ruleId: r.ruleId || "(unknown)",
-      level: r.level || "warning",
-      message: (r.message && (r.message.text || r.message.markdown)) || "",
-      score: numOrNull(props["composite-score"]),
-      reliability: numOrNull(props["reliability-score"]),
-      stealth: numOrNull(props["stealth-score"]),
-      confidence: numOrNull(props["confidence-score"]),
-      chainId: props["chain-id"] || null,
-      chainLength: numOrNull(props["chain-length"]),
-      techniques: Array.isArray(props.techniques) ? props.techniques : [],
-      rule: rules[r.ruleId] || null,
-    };
-  });
-  return { run, rules, results };
-}
-
-// ----- severity helpers ---------------------------------------------
-// SARIF `level` is one of: error, warning, note, none. Cepheus also
-// emits a `composite-score` we map back to a finer-grained label.
-function severityLabel(result) {
-  // Prefer explicit critical when score is very high — gives users a
-  // tighter signal than the SARIF level alone.
-  if (result.score !== null && result.score >= 0.85) return "critical";
-  if (result.level === "error") return "high";
-  if (result.level === "warning") return "medium";
-  if (result.level === "note") return "low";
-  return "none";
-}
-
-function severityRank(s) {
-  return { critical: 4, high: 3, medium: 2, low: 1, none: 0 }[s] || 0;
-}
-
-// ----- rendering -----------------------------------------------------
-function render() {
-  if (!state.sarif) return;
-  document.getElementById("loader-view").hidden = true;
-  document.getElementById("data-view").hidden = false;
-
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const r of state.results) {
-    const s = severityLabel(r);
-    if (counts[s] !== undefined) counts[s]++;
-  }
-  document.getElementById("count-crit").textContent = counts.critical;
-  document.getElementById("count-high").textContent = counts.high;
-  document.getElementById("count-med").textContent = counts.medium;
-  document.getElementById("count-low").textContent = counts.low;
-
-  renderTable();
-}
-
-function renderTable() {
-  const tbody = document.getElementById("results-tbody");
-  clearNode(tbody);
-  const sorted = [...state.filtered].sort((a, b) => {
-    const sa = severityRank(severityLabel(a));
-    const sb = severityRank(severityLabel(b));
-    if (sa !== sb) return sb - sa;
-    return (b.score || 0) - (a.score || 0);
-  });
-  for (const r of sorted) {
-    const tr = el("tr", { cls: "result-row" + (r.index === state.selectedIndex ? " selected" : "") });
-    tr.addEventListener("click", () => selectResult(r.index));
-    const sev = severityLabel(r);
-
-    const td0 = el("td");
-    td0.appendChild(el("span", { cls: "severity " + sev, text: sev }));
-    tr.appendChild(td0);
-
-    tr.appendChild(el("td", { text: r.ruleId }));
-    tr.appendChild(el("td", { text: r.score !== null ? r.score.toFixed(2) : "—" }));
-    tr.appendChild(el("td", { cls: "filename", text: r.techniques.join(" → ") }));
-
-    tbody.appendChild(tr);
-  }
-}
-
-function selectResult(index) {
-  state.selectedIndex = index;
-  const r = state.results[index];
-  renderTable();
-  renderChain(r);
-}
-
-function renderChain(result) {
-  const view = document.getElementById("chain-view");
-  clearNode(view);
-  if (!result) {
-    const empty = el("div", { cls: "empty" });
-    empty.appendChild(el("p", { text: "Select a finding on the left." }));
-    view.appendChild(empty);
-    return;
-  }
-  const techniques = result.techniques.length ? result.techniques : [result.ruleId];
-  const rule = result.rule || {};
-  const helpUri = rule.helpUri || "";
-  const help = (rule.help && (rule.help.text || rule.help.markdown)) || (rule.fullDescription && rule.fullDescription.text) || "";
-
-  view.appendChild(el("h3", { text: rule.name || result.ruleId }));
-
-  const meta = el("div", { cls: "meta" });
-  const sev = severityLabel(result);
-  meta.appendChild(el("span", { cls: "severity " + sev, text: sev }));
-  if (result.score !== null) meta.appendChild(document.createTextNode(" · score " + result.score.toFixed(2)));
-  if (result.chainLength !== null) meta.appendChild(document.createTextNode(" · chain length " + result.chainLength));
-  if (result.chainId) {
-    meta.appendChild(document.createTextNode(" · "));
-    meta.appendChild(el("code", { text: result.chainId }));
-  }
-  view.appendChild(meta);
-
-  view.appendChild(buildChainSvg(techniques));
-
-  const detail = el("div", { cls: "chain-detail" });
-  const dl = el("dl");
-  function addPair(label, value, asCode) {
-    const dt = el("dt", { text: label });
-    const dd = el("dd");
-    if (asCode === "link") {
-      // The viewer opens arbitrary, possibly third-party SARIF files, so
-      // a rule's helpUri is untrusted. Only render it as a clickable link
-      // when it's an http(s) URL — a `javascript:`/`data:` URI would
-      // execute in the page origin on click. Anything else falls back to
-      // inert text.
-      let safe = false;
-      try {
-        const u = new URL(value, location.href);
-        safe = u.protocol === "https:" || u.protocol === "http:";
-      } catch (_) {
-        safe = false;
+<!-- ============ EMBEDDED SAMPLE SARIF (trusted demo data) ============ -->
+<script type="application/json" id="sample-report">
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [{
+    "tool": { "driver": {
+      "name": "Cepheus",
+      "version": "1.4.0",
+      "informationUri": "https://cepheus.dev",
+      "rules": [
+        { "id": "CEP-ESCAPE-0007", "name": "Privileged container to host root", "helpUri": "https://cepheus.dev/techniques/T1611" },
+        { "id": "CEP-SOCK-0002", "name": "Exposed Docker socket mount", "helpUri": "https://cepheus.dev/techniques/docker-socket" },
+        { "id": "CEP-PTRACE-0019", "name": "CAP_SYS_PTRACE host process injection", "helpUri": "https://cepheus.dev/techniques/ptrace-host" },
+        { "id": "CEP-MOUNT-0011", "name": "Writable hostPath volume", "helpUri": "https://cepheus.dev/techniques/hostpath" },
+        { "id": "CEP-SATOKEN-0023", "name": "Over-privileged service account token", "helpUri": "https://cepheus.dev/techniques/sa-token" },
+        { "id": "CEP-ROOTUSR-0031", "name": "Container process runs as UID 0", "helpUri": "https://cepheus.dev/techniques/run-as-root" }
+      ]
+    }},
+    "results": [
+      {
+        "ruleId": "CEP-ESCAPE-0007",
+        "level": "error",
+        "message": { "text": "The `web-7f9` pod is scheduled with `securityContext.privileged: true`, granting the container full CAP_SYS_ADMIN. Cepheus confirmed a working escape: mounting the host cgroup v1 controller, rewriting the `release_agent` to a controlled script, then triggering it via an emptied cgroup `notify_on_release`. The agent executes as root in the host's initial namespace, yielding code execution on the kubelet node outside any container boundary." },
+        "properties": {
+          "severity": "critical",
+          "score": 0.96,
+          "chainId": "chain-7f9a",
+          "chainLength": 5,
+          "impact": "Full root code execution on the underlying Kubernetes node.",
+          "affectedComponents": ["Container: web-7f9", "Linux capabilities", "Host cgroup v1", "kubelet node"],
+          "recommendation": "Set `securityContext.privileged: false`, drop `CAP_SYS_ADMIN`, and run with `--security-opt=no-new-privileges`. Enforce a restricted Pod Security Standard at the namespace level.",
+          "reliability": 0.92,
+          "stealth": 0.41,
+          "confidence": 0.95,
+          "techniques": [
+            { "id": "T1610", "label": "Deploy Container" },
+            { "id": "T1611", "label": "Escape to Host" },
+            { "id": "CAP_SYS_ADMIN", "label": "Capability Abuse" },
+            { "id": "cgroup", "label": "release_agent" },
+            { "id": "T1611.001", "label": "Host Root Exec" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.2.1", "5.2.5", "5.2.6"],
+            "NIST SP 800-190": ["4.4.2", "4.5.1"],
+            "PCI DSS": ["2.2.4", "7.1.2"]
+          },
+          "reference": "https://cepheus.dev/techniques/T1611"
+        }
+      },
+      {
+        "ruleId": "CEP-SOCK-0002",
+        "level": "error",
+        "message": { "text": "`/var/run/docker.sock` is bind-mounted read-write into the `ci-runner` container. Cepheus used the mounted socket to create a sibling container with the host root filesystem mounted at `/host` and `pid: host`, then wrote a cron entry under `/host/etc/cron.d`. This is a complete control-plane escape that does not require any kernel capability." },
+        "properties": {
+          "severity": "critical",
+          "score": 0.91,
+          "chainId": "chain-2c41",
+          "chainLength": 4,
+          "impact": "Arbitrary container creation and host filesystem write via the Docker daemon.",
+          "affectedComponents": ["Container: ci-runner", "Host mounts", "Docker daemon socket"],
+          "recommendation": "Never mount `docker.sock` into workloads. Use a rootless or socket-proxied builder (e.g. BuildKit) and apply an admission policy that blocks `hostPath` mounts of the daemon socket.",
+          "reliability": 0.97,
+          "stealth": 0.33,
+          "confidence": 0.98,
+          "techniques": [
+            { "id": "T1610", "label": "Deploy Container" },
+            { "id": "docker.sock", "label": "Daemon Socket" },
+            { "id": "T1611", "label": "Escape to Host" },
+            { "id": "T1053", "label": "Cron Persistence" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.2.4"],
+            "NIST SP 800-190": ["4.4.1", "4.4.4"],
+            "PCI DSS": ["2.2.4"]
+          },
+          "reference": "https://cepheus.dev/techniques/docker-socket"
+        }
+      },
+      {
+        "ruleId": "CEP-PTRACE-0019",
+        "level": "error",
+        "message": { "text": "The `debug-sidecar` container holds `CAP_SYS_PTRACE` and shares the host PID namespace (`hostPID: true`). Cepheus attached to a root-owned host process and injected shellcode into its address space, achieving execution in the host context. Reliability depends on a stable target process being present." },
+        "properties": {
+          "severity": "high",
+          "score": 0.81,
+          "chainId": "chain-9b18",
+          "chainLength": 3,
+          "impact": "Code execution in a root host process via cross-namespace ptrace.",
+          "affectedComponents": ["Container: debug-sidecar", "Host PID namespace", "Linux capabilities"],
+          "recommendation": "Remove `hostPID: true` and drop `CAP_SYS_PTRACE`. Restrict debugging sidecars to ephemeral containers gated by RBAC.",
+          "reliability": 0.68,
+          "stealth": 0.72,
+          "confidence": 0.88,
+          "techniques": [
+            { "id": "hostPID", "label": "Shared PID NS" },
+            { "id": "CAP_SYS_PTRACE", "label": "Ptrace Attach" },
+            { "id": "T1055", "label": "Process Injection" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.2.3", "5.2.5"],
+            "NIST SP 800-190": ["4.4.2"],
+            "PCI DSS": ["7.1.2"]
+          },
+          "reference": "https://cepheus.dev/techniques/ptrace-host"
+        }
+      },
+      {
+        "ruleId": "CEP-MOUNT-0011",
+        "level": "warning",
+        "message": { "text": "A writable `hostPath` volume mounts `/var/lib/kubelet/pods` into the `log-shipper` container. Cepheus demonstrated that an attacker can traverse into a neighboring pod's projected service-account token directory and read credentials belonging to a more privileged workload. No kernel escape, but lateral movement to another identity is proven." },
+        "properties": {
+          "severity": "high",
+          "score": 0.74,
+          "chainId": "chain-44ad",
+          "chainLength": 3,
+          "impact": "Cross-pod credential theft via a writable host volume.",
+          "affectedComponents": ["Container: log-shipper", "Host mounts", "Projected SA tokens"],
+          "recommendation": "Mount `hostPath` volumes read-only and scope them to a dedicated path. Prefer CSI ephemeral volumes; deny broad `hostPath` mounts via admission control.",
+          "reliability": 0.79,
+          "stealth": 0.64,
+          "confidence": 0.83,
+          "techniques": [
+            { "id": "hostPath", "label": "Host Volume" },
+            { "id": "T1006", "label": "Path Traversal" },
+            { "id": "T1552.001", "label": "Creds in Files" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.2.10"],
+            "NIST SP 800-190": ["4.5.2"],
+            "PCI DSS": ["7.1.2", "8.2.1"]
+          },
+          "reference": "https://cepheus.dev/techniques/hostpath"
+        }
+      },
+      {
+        "ruleId": "CEP-SATOKEN-0023",
+        "level": "warning",
+        "message": { "text": "The default service account token mounted into `frontend-api` is bound to a role with `pods/exec` across the namespace. While not a host escape, Cepheus used the token to exec into a peer pod, expanding the blast radius within the cluster boundary." },
+        "properties": {
+          "severity": "medium",
+          "score": 0.55,
+          "chainId": "chain-6e02",
+          "chainLength": 2,
+          "impact": "Namespace-wide pod exec via an over-scoped service account.",
+          "affectedComponents": ["Container: frontend-api", "Service account token", "RBAC role binding"],
+          "recommendation": "Set `automountServiceAccountToken: false` where unused and scope RBAC to least privilege. Audit any role granting `pods/exec`.",
+          "reliability": 0.81,
+          "stealth": 0.58,
+          "confidence": 0.76,
+          "techniques": [
+            { "id": "SA-token", "label": "Token Mount" },
+            { "id": "T1078", "label": "Valid Accounts" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.1.5", "5.1.6"],
+            "NIST SP 800-190": ["4.5.1"],
+            "PCI DSS": ["7.1.2"]
+          },
+          "reference": "https://cepheus.dev/techniques/sa-token"
+        }
+      },
+      {
+        "ruleId": "CEP-ROOTUSR-0031",
+        "level": "note",
+        "message": { "text": "The `static-assets` container runs as UID 0 with no `runAsNonRoot` constraint. No escape primitive was demonstrated, but running as root removes a defense-in-depth layer and would amplify the impact of any future container breakout." },
+        "properties": {
+          "severity": "low",
+          "score": 0.28,
+          "chainId": "chain-1f55",
+          "chainLength": 1,
+          "impact": "Container process runs as root, weakening breakout containment.",
+          "affectedComponents": ["Container: static-assets", "Pod securityContext"],
+          "recommendation": "Set `runAsNonRoot: true` and a non-zero `runAsUser`. Add `allowPrivilegeEscalation: false` and a read-only root filesystem.",
+          "reliability": 0.99,
+          "stealth": 0.20,
+          "confidence": 0.99,
+          "techniques": [
+            { "id": "runAsRoot", "label": "Root UID" }
+          ],
+          "compliance": {
+            "CIS Kubernetes Benchmark": ["5.2.6"],
+            "NIST SP 800-190": ["4.4.2"],
+            "PCI DSS": ["2.2.4"]
+          },
+          "reference": "https://cepheus.dev/techniques/run-as-root"
+        }
       }
-      if (safe) {
-        dd.appendChild(el("a", { text: value, attrs: { href: value, target: "_blank", rel: "noopener noreferrer" } }));
-      } else {
-        dd.textContent = value;
-      }
-    } else {
-      dd.textContent = value;
-    }
-    dl.appendChild(dt);
-    dl.appendChild(dd);
-  }
-  if (result.message) addPair("Message", result.message);
-  if (result.reliability !== null) addPair("Reliability", result.reliability.toFixed(2));
-  if (result.stealth !== null) addPair("Stealth", result.stealth.toFixed(2));
-  if (result.confidence !== null) addPair("Confidence", result.confidence.toFixed(2));
-  // Compliance crosswalk lives on the SARIF rule's properties.
-  const ruleProps = (rule && rule.properties) || {};
-  const cis = ruleProps["cis-kubernetes-benchmark"];
-  const nist = ruleProps["nist-800-190"];
-  const pci = ruleProps["pci-dss"];
-  if (Array.isArray(cis) && cis.length) addPair("CIS Kubernetes Benchmark", cis.join(", "));
-  if (Array.isArray(nist) && nist.length) addPair("NIST SP 800-190", nist.join(", "));
-  if (Array.isArray(pci) && pci.length) addPair("PCI DSS", pci.join(", "));
-  if (helpUri) addPair("Reference", helpUri, "link");
-  detail.appendChild(dl);
-
-  if (help) {
-    const det = el("details", { cls: "poc" });
-    det.appendChild(el("summary", { text: "Technique details" }));
-    det.appendChild(el("pre", { text: help }));
-    detail.appendChild(det);
-  }
-  view.appendChild(detail);
+    ]
+  }]
 }
-
-function buildChainSvg(techniques) {
-  // Single-row left-to-right layout. Keeps SVG legible without
-  // pulling in a force-directed layout library — Cepheus chains are
-  // short (mean length ~2.5), so a linear flow is the right primitive.
-  const NODE_W = 160, NODE_H = 44, GAP = 28, PAD = 12;
-  const totalW = PAD * 2 + NODE_W * techniques.length + GAP * Math.max(0, techniques.length - 1);
-  const totalH = PAD * 2 + NODE_H;
-  const svg = svgEl("svg", {
-    class: "chain-svg",
-    viewBox: `0 0 ${totalW} ${totalH}`,
-    preserveAspectRatio: "xMidYMid meet",
-  });
-
-  techniques.forEach((id, i) => {
-    const x = PAD + i * (NODE_W + GAP);
-    const y = PAD;
-
-    if (i > 0) {
-      const x1 = PAD + (i - 1) * (NODE_W + GAP) + NODE_W;
-      const x2 = x;
-      const yc = y + NODE_H / 2;
-      svg.appendChild(svgEl("line", {
-        x1, y1: yc, x2: x2 - 6, y2: yc,
-        stroke: "#6ea8fe", "stroke-width": 1.5, "stroke-dasharray": "4,3",
-      }));
-      svg.appendChild(svgEl("polygon", {
-        points: `${x2 - 6},${yc - 4} ${x2},${yc} ${x2 - 6},${yc + 4}`,
-        fill: "#6ea8fe",
-      }));
-    }
-
-    svg.appendChild(svgEl("rect", {
-      x, y, width: NODE_W, height: NODE_H, rx: 6,
-      fill: "#1d2230", stroke: "#6ea8fe", "stroke-width": 1,
-    }));
-    const txt = svgEl("text", {
-      x: x + NODE_W / 2,
-      y: y + NODE_H / 2 + 4,
-      "text-anchor": "middle",
-      fill: "#e6e8eb",
-      "font-family": "ui-monospace, monospace",
-      "font-size": 12,
-    });
-    txt.textContent = id;
-    svg.appendChild(txt);
-  });
-
-  return svg;
-}
-
-// ----- filtering -----------------------------------------------------
-function applyFilters() {
-  const q = (document.getElementById("filter").value || "").toLowerCase().trim();
-  const sevFilter = document.getElementById("severity-filter").value;
-  state.filtered = state.results.filter((r) => {
-    // Filter on the same four-bucket label the stats and table use, so
-    // selecting "High" matches the "High" count rather than returning
-    // the raw SARIF level (which collapses critical+high into "error").
-    if (sevFilter && severityLabel(r) !== sevFilter) return false;
-    if (q) {
-      const hay = [r.ruleId, r.message, r.techniques.join(" "), r.chainId || ""].join(" ").toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  // If the selected finding was filtered out, clear the stale detail pane.
-  // selectedIndex lives in state.results index space, so match on r.index.
-  if (state.selectedIndex !== -1 && !state.filtered.some((r) => r.index === state.selectedIndex)) {
-    state.selectedIndex = -1;
-    renderChain(null);
-  }
-  renderTable();
-}
-
-// ----- load handling ------------------------------------------------
-function loadBlob(text, filename) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    alert("That file is not valid JSON: " + e.message);
-    return;
-  }
-  let parsedSarif;
-  try {
-    parsedSarif = parseSarif(parsed);
-  } catch (e) {
-    alert("That file isn't a SARIF report we recognise: " + e.message);
-    return;
-  }
-  state.sarif = parsed;
-  state.results = parsedSarif.results;
-  state.filtered = parsedSarif.results;
-  state.selectedIndex = -1;
-  // Reset filter controls + detail pane so prior-file state doesn't leak
-  // into the newly-loaded report.
-  document.getElementById("filter").value = "";
-  document.getElementById("severity-filter").value = "";
-  document.getElementById("file-info").textContent = filename + " — " + state.results.length + " finding(s)";
-  render();
-  renderChain(null);
-}
-
-function readFile(file) {
-  const reader = new FileReader();
-  reader.onerror = () => alert("Couldn't read that file.");
-  reader.onload = () => loadBlob(reader.result, file.name);
-  reader.readAsText(file);
-}
-
-document.getElementById("file-input").addEventListener("change", (ev) => {
-  const f = ev.target.files && ev.target.files[0];
-  if (f) readFile(f);
-});
-
-document.getElementById("open-button").addEventListener("click", () => {
-  document.getElementById("file-input").click();
-});
-
-const dz = document.getElementById("drop-zone");
-dz.addEventListener("click", () => document.getElementById("file-input").click());
-["dragenter", "dragover"].forEach((evt) =>
-  dz.addEventListener(evt, (e) => { e.preventDefault(); dz.classList.add("dragover"); })
-);
-["dragleave", "drop"].forEach((evt) =>
-  dz.addEventListener(evt, (e) => { e.preventDefault(); dz.classList.remove("dragover"); })
-);
-dz.addEventListener("drop", (e) => {
-  const f = e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f) readFile(f);
-});
-
-document.getElementById("filter").addEventListener("input", applyFilters);
-document.getElementById("severity-filter").addEventListener("change", applyFilters);
 </script>
+
+<script src="viewer.js"></script>
+<script src="viewer-ui.js"></script>
 </body>
 </html>

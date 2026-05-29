@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cepheus.models.chain import EscapeChain
 from cepheus.models.posture import ContainerPosture
@@ -10,6 +10,12 @@ from cepheus.models.technique import Severity
 
 
 class RemediationItem(BaseModel):
+    # Frozen: a remediation item is built once and never mutated.
+    # Immutability is part of the 1.0 API contract (see docs/API.md).
+    # AnalysisResult itself stays mutable (the CLI enriches it with LLM
+    # analysis / executive summary and applies severity filtering).
+    model_config = ConfigDict(frozen=True)
+
     technique_id: str
     severity: Severity
     current_state: str

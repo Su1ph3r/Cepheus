@@ -7,8 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-28
+
+First stable release. The `cepheus.engine` and `cepheus.models` public API and
+the SARIF / JSON output contracts are now covered by semantic versioning — see
+[docs/API.md](docs/API.md).
+
 ### Added
 
+- **Finding context — Impact, Affected Component(s), and Recommendation.**
+  Each SARIF result now carries `impact` (the consequence / end-state) and
+  `affected-components` (the container plus the subsystems the chain abuses);
+  each rule carries a `remediation` recommendation (including the runtime
+  flag that closes the primitive when one exists). The web SARIF viewer
+  surfaces Severity, Affected component(s), Impact, and Recommendation as
+  dedicated detail-panel fields. Per-technique impact statements are curated
+  for every built-in technique, with a severity-derived fallback so the
+  field is never blank.
 - **`cepheus fleet scan`** — enumerate every running pod in a cluster via
   `kubectl get pods -o json` and analyze each one, emitting a fleet report
   (JSON). Supports `--namespace`, `--selector`, `--context`, `--kubeconfig`,
@@ -20,28 +35,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when any pod gains chains or raises its score, for CI drift gating.
 - **`cepheus update`** — check whether a newer published release is
   available and print the upgrade command for each install channel.
-  `--fail-if-outdated` exits non-zero when an upgrade is available. The
-  check is unauthenticated and read-only; no in-place self-upgrade.
+  `--fail-if-outdated` exits non-zero when an upgrade is available.
+  `--apply` detects the install method (pipx/pip/brew/scoop) and runs the
+  upgrade in place after confirmation; binary installs are advised to
+  upgrade manually. Unauthenticated, read-only check.
+- **`cepheus notify`** — send a one-off notification through the
+  configured channels (for verifying notifier config or scripting alerts
+  from a CI pipeline outside the admission webhook).
 - **Admission webhook outbound notifications.** `cepheus admission-server`
-  gains `--slack-webhook-url` and `--pagerduty-routing-key` (also via the
-  `CEPHEUS_SLACK_WEBHOOK_URL` / `CEPHEUS_PAGERDUTY_ROUTING_KEY` env vars).
-  Every DENY (and WARN-mode near-deny) is POSTed to the configured
-  channels. Delivery is best-effort, rate-limited, and dispatched on
-  background threads so it never blocks the admission decision.
+  gains `--slack-webhook-url`, `--pagerduty-routing-key`, and a generic
+  `--webhook-url` (also via the `CEPHEUS_SLACK_WEBHOOK_URL` /
+  `CEPHEUS_PAGERDUTY_ROUTING_KEY` / `CEPHEUS_WEBHOOK_URL` env vars). Every
+  DENY (and WARN-mode near-deny) is POSTed to the configured channels.
+  Delivery is best-effort and dispatched on background threads so it never
+  blocks the admission decision; DENY and WARN are rate-limited
+  independently so a WARN flood can't starve deny alerts.
+- **Optional mutual TLS on the admission webhook.** `--client-ca` (chart:
+  `mtls.clientCASecret`) requires and verifies a client certificate on the
+  `/validate` port, so only the kube-apiserver can reach it. Default off
+  (server-only TLS).
+- **Self-signed TLS for the admission Helm chart.** `tls.selfSigned=true`
+  runs a one-shot bootstrap Job that generates a CA + serving cert and
+  patches the webhook caBundle — an alternative to cert-manager for
+  kind/minikube. The three TLS modes (cert-manager / existing secret /
+  self-signed) are now mutually exclusive.
 - **Compliance crosswalk.** Techniques can carry CIS Kubernetes Benchmark,
   NIST SP 800-190, and PCI-DSS control identifiers, surfaced in SARIF rule
-  properties and the HTML report. A curated starter set maps the
-  capability, socket, mount, and secret families.
+  properties, the HTML report, and the web viewer. Coverage spans the
+  capability, socket, mount, cgroup, device, and secret families.
 - **Performance regression suite.** CI pins analyzer wall-clock and
   peak-allocation budgets over the K8s Goat fixtures so an algorithmic
   regression is caught at build time.
 - **Admission webhook end-to-end test.** A kind-based workflow exercises
   the webhook against a live cluster.
+- **Static SARIF attack-graph viewer** (`web/`), with its pure functions
+  unit-tested via Node's built-in test runner in CI.
+- **Documented public API.** `docs/API.md` defines the stable
+  `cepheus.engine` / `cepheus.models` surface and the SARIF/JSON output
+  contract under semantic versioning; `docs/THREATMODEL.md` records trust
+  boundaries and the external-audit scope.
 
 ### Changed
 
 - Verifier coverage raised to 57/65; the coverage regression floor is now
   55/65 (was 47/65).
+- `cepheus.engine` and `cepheus.models` now declare explicit `__all__`
+  public surfaces; `ChainStep` and `RemediationItem` are now immutable
+  (frozen). Other models stay mutable by design (see `docs/API.md`).
+
+### Fixed
+
+- **`cepheus diff` verdict** is now three-state — IMPROVED / UNCHANGED /
+  REGRESSED. Previously an unchanged posture was reported as "improved";
+  `improved` now means a strict improvement (at least one metric better,
+  none worse).
+- **runc-version CVEs are no longer suppressed on distro/vendor kernels.**
+  `version_lte` (a specific-component version check) was mis-classified as
+  a kernel-range check, so a *known* vulnerable runc on EKS/AKS/GKE/WSL2
+  was confidence-capped below threshold and dropped. It now matches; an
+  *unknown* runc version still stays below threshold (no false positive).
+- **Malformed PodSpecs no longer crash the admission webhook.** A
+  non-list `containers` or non-string `runtimeClassName` is coerced
+  defensively instead of raising (which surfaced as an HTTP 500).
+- **Robustness:** malformed kernel-version strings no longer false-positive
+  `kernel_lte` CVE gates; `gte`/`lte` reject boolean values; the SARIF web
+  viewer tolerates malformed third-party SARIF and labels severity from the
+  exact Cepheus severity; an LLM failure now surfaces a visible CLI warning
+  rather than a silent degraded report.
 
 ## [0.6.3] - 2026-05-27
 

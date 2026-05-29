@@ -37,9 +37,21 @@
                 ],
                 "security-severity": "5.5",
                 "precision": "high",
+                "remediation": "Use secrets management (Vault, K8s secrets), not env vars",
+                "impact": "Exposed credentials in environment variables enabling lateral movement.",
                 "mitre-attack": [
                   "T1552",
                   "T1552.001"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.4.1"
+                ],
+                "nist-800-190": [
+                  "4.3.5"
+                ],
+                "pci-dss": [
+                  "3.5.1",
+                  "8.6.1"
                 ]
               }
             },
@@ -68,9 +80,20 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "--cap-drop=DAC_READ_SEARCH",
+                "impact": "Read access to any file on the host, including credentials, keys, and tokens.",
                 "mitre-attack": [
                   "T1005",
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -99,8 +122,21 @@
                 ],
                 "security-severity": "5.5",
                 "precision": "high",
+                "remediation": "Least-privilege RBAC, encrypt secrets at rest",
+                "impact": "Readable Kubernetes secrets and configmaps enabling lateral movement.",
                 "mitre-attack": [
                   "T1552.007"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.4.1",
+                  "5.4.2"
+                ],
+                "nist-800-190": [
+                  "4.3.5"
+                ],
+                "pci-dss": [
+                  "3.5.1",
+                  "8.6.1"
                 ]
               }
             },
@@ -129,8 +165,21 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "automountServiceAccountToken: false",
+                "impact": "Service-account token abuse against the Kubernetes API enabling lateral movement.",
                 "mitre-attack": [
                   "T1078"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.1.5",
+                  "5.1.6"
+                ],
+                "nist-800-190": [
+                  "4.5.2"
+                ],
+                "pci-dss": [
+                  "7.2.1",
+                  "8.2.1"
                 ]
               }
             },
@@ -159,9 +208,20 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "--cap-drop=DAC_OVERRIDE and avoid privileged/hostPath mounts",
+                "impact": "Write access to any file on the host, enabling persistence and privilege escalation.",
                 "mitre-attack": [
                   "T1565",
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -190,9 +250,20 @@
                 ],
                 "security-severity": "5.5",
                 "precision": "high",
+                "remediation": "Use --ipc=private, restrict /dev/shm size",
+                "impact": "Cross-container data exfiltration via shared writable /dev/shm.",
                 "mitre-attack": [
                   "T1005",
                   "T1080"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.10"
+                ],
+                "nist-800-190": [
+                  "4.2.2"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -221,8 +292,19 @@
                 ],
                 "security-severity": "5.5",
                 "precision": "high",
+                "remediation": "--cap-drop=NET_ADMIN",
+                "impact": "Host network reconfiguration enabling traffic interception and ARP/DNS spoofing.",
                 "mitre-attack": [
                   "T1557"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4"
+                ],
+                "pci-dss": [
+                  "1.2.1"
                 ]
               }
             },
@@ -251,9 +333,20 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "--cap-drop=SYS_PTRACE --pid=container",
+                "impact": "Code injection into host processes, escalating to host-level code execution.",
                 "mitre-attack": [
                   "T1055",
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -282,8 +375,23 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "--cap-drop=ALL --cap-add=<needed> (runtime flag: --cap-drop=SYS_ADMIN)",
+                "impact": "Read/write access to the entire host filesystem, leading to full node compromise.",
                 "mitre-attack": [
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.1",
+                  "5.2.6",
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4",
+                  "4.2.5"
+                ],
+                "pci-dss": [
+                  "2.2.5",
+                  "7.2.1"
                 ]
               }
             },
@@ -312,9 +420,20 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "Drop CAP_SYS_ADMIN and CAP_BPF",
+                "impact": "Arbitrary kernel memory read/write, escalating to root code execution on the host.",
                 "mitre-attack": [
                   "T1611",
                   "T1068"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.1"
+                ],
+                "nist-800-190": [
+                  "4.2.5"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -343,9 +462,20 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "Drop CAP_SYS_ADMIN and CAP_BPF, enable seccomp",
+                "impact": "Kernel-assisted writes to process memory, escalating to host code execution.",
                 "mitre-attack": [
                   "T1611",
                   "T1068"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.1"
+                ],
+                "nist-800-190": [
+                  "4.2.5"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -374,8 +504,19 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "Mount /proc read-only or use seccomp",
+                "impact": "Host command execution as root by hijacking the kernel core-dump handler.",
                 "mitre-attack": [
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.10"
+                ],
+                "nist-800-190": [
+                  "4.2.2"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -404,6 +545,8 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "Restrict kubelet proxy access via RBAC",
+                "impact": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
                 "mitre-attack": [
                   "T1090"
                 ]
@@ -434,6 +577,8 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "--privileged=false, mount /proc read-only",
+                "impact": "Privileged container with writable /proc/sys/kernel \u2192 core_pattern host code execution.",
                 "mitre-attack": [
                   "T1611"
                 ]
@@ -464,6 +609,8 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "Enable kubelet authentication and authorization",
+                "impact": "Command execution in any pod on the node via the unauthenticated kubelet API.",
                 "mitre-attack": [
                   "T1106"
                 ]
@@ -494,8 +641,19 @@
                 ],
                 "security-severity": "2.5",
                 "precision": "high",
+                "remediation": "Enable SELinux: --security-opt label=type:container_t",
+                "impact": "SELinux disabled/unconfined \u2014 removes the MAC layer that contains escapes.",
                 "mitre-attack": [
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.7.2"
+                ],
+                "nist-800-190": [
+                  "4.2.1"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -524,8 +682,19 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "--privileged=false, use --device for specific needs",
+                "impact": "Raw read/write of host disks and devices, bypassing all filesystem controls.",
                 "mitre-attack": [
                   "T1006"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.10"
+                ],
+                "nist-800-190": [
+                  "4.2.2"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -554,8 +723,19 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "Mount /proc read-only",
+                "impact": "Crash or reboot the host kernel \u2014 host-wide denial of service.",
                 "mitre-attack": [
                   "T1529"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.10"
+                ],
+                "nist-800-190": [
+                  "4.2.2"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -584,8 +764,20 @@
                 ],
                 "security-severity": "8.0",
                 "precision": "high",
+                "remediation": "Restrict /proc access, use read-only /proc mounts",
+                "impact": "Read/write host files outside the container via /proc/self/fd symlinks.",
                 "mitre-attack": [
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.10"
+                ],
+                "nist-800-190": [
+                  "4.2.2",
+                  "4.3.5"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             },
@@ -614,9 +806,20 @@
                 ],
                 "security-severity": "9.5",
                 "precision": "high",
+                "remediation": "--cap-drop=SYS_RAWIO",
+                "impact": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
                 "mitre-attack": [
                   "T1006",
                   "T1611"
+                ],
+                "cis-kubernetes-benchmark": [
+                  "5.2.8"
+                ],
+                "nist-800-190": [
+                  "4.2.4"
+                ],
+                "pci-dss": [
+                  "2.2.5"
                 ]
               }
             }
@@ -658,6 +861,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "871e241f3043b892",
+            "severity": "medium",
+            "impact": "Exposed credentials in environment variables enabling lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Exposed secrets / metadata"
+            ],
             "techniques": [
               "env_secret_leak"
             ]
@@ -700,6 +909,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "49e5f1fd9e107c44",
+            "severity": "high",
+            "impact": "Read access to any file on the host, including credentials, keys, and tokens.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_dac_read_search"
             ]
@@ -742,6 +957,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "65168ee37a44b555",
+            "severity": "medium",
+            "impact": "Readable Kubernetes secrets and configmaps enabling lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Exposed secrets / metadata"
+            ],
             "techniques": [
               "k8s_configmap_secrets"
             ]
@@ -784,6 +1005,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "02e451346256920a",
+            "severity": "high",
+            "impact": "Service-account token abuse against the Kubernetes API enabling lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "k8s_service_account"
             ]
@@ -826,6 +1053,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "a46a951a94467656",
+            "severity": "high",
+            "impact": "Write access to any file on the host, enabling persistence and privilege escalation.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_dac_override"
             ]
@@ -868,6 +1101,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "5955fb51d2da06e4",
+            "severity": "medium",
+            "impact": "Cross-container data exfiltration via shared writable /dev/shm.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem"
+            ],
             "techniques": [
               "tmpfs_shm_cross_container"
             ]
@@ -910,6 +1149,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "4f6b9b6b2b6c7db9",
+            "severity": "medium",
+            "impact": "Host network reconfiguration enabling traffic interception and ARP/DNS spoofing.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_net_admin"
             ]
@@ -952,6 +1197,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "a6eeca330cdc4f27",
+            "severity": "high",
+            "impact": "Code injection into host processes, escalating to host-level code execution.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_sys_ptrace"
             ]
@@ -994,6 +1245,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "23eef5a2a0aae06f",
+            "severity": "critical",
+            "impact": "Read/write access to the entire host filesystem, leading to full node compromise.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_sys_admin_mount"
             ]
@@ -1036,6 +1293,13 @@
             "confidence-score": 1.0,
             "chain-length": 2,
             "chain-id": "a50e7f0ba59d81fd",
+            "severity": "high",
+            "impact": "Exposed credentials in environment variables enabling lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Exposed secrets / metadata",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "env_secret_leak",
               "k8s_service_account"
@@ -1079,6 +1343,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "d9875ba833eaa7c0",
+            "severity": "critical",
+            "impact": "Arbitrary kernel memory read/write, escalating to root code execution on the host.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_sys_admin_bpf"
             ]
@@ -1121,6 +1391,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "cb583ddd0711b685",
+            "severity": "critical",
+            "impact": "Kernel-assisted writes to process memory, escalating to host code execution.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "ebpf_probe_write_user"
             ]
@@ -1163,6 +1439,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "2e6f0278176dae3e",
+            "severity": "critical",
+            "impact": "Host command execution as root by hijacking the kernel core-dump handler.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem"
+            ],
             "techniques": [
               "procfs_core_pattern"
             ]
@@ -1205,6 +1487,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "f404986c4a993b49",
+            "severity": "high",
+            "impact": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "k8s_node_proxy"
             ]
@@ -1247,6 +1535,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "a0f450fad043f91b",
+            "severity": "critical",
+            "impact": "Privileged container with writable /proc/sys/kernel \u2192 core_pattern host code execution.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Multiple subsystems"
+            ],
             "techniques": [
               "writable_proc_privileged"
             ]
@@ -1289,6 +1583,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "16a8ba6400671ec5",
+            "severity": "high",
+            "impact": "Command execution in any pod on the node via the unauthenticated kubelet API.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "k8s_kubelet_api"
             ]
@@ -1331,6 +1631,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "9fa14b3014d53d53",
+            "severity": "low",
+            "impact": "SELinux disabled/unconfined \u2014 removes the MAC layer that contains escapes.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "lsm_selinux_unconfined"
             ]
@@ -1373,6 +1679,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "1d320b8cb0666415",
+            "severity": "critical",
+            "impact": "Raw read/write of host disks and devices, bypassing all filesystem controls.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem"
+            ],
             "techniques": [
               "devfs_access"
             ]
@@ -1415,6 +1727,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "87a67cc22e6d85d2",
+            "severity": "high",
+            "impact": "Crash or reboot the host kernel \u2014 host-wide denial of service.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem"
+            ],
             "techniques": [
               "procfs_sysrq"
             ]
@@ -1457,6 +1775,13 @@
             "confidence-score": 1.0,
             "chain-length": 2,
             "chain-id": "8cdd4e2ec4542afa",
+            "severity": "high",
+            "impact": "Readable Kubernetes secrets and configmaps enabling lateral movement.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Exposed secrets / metadata",
+              "Container runtime / orchestrator"
+            ],
             "techniques": [
               "k8s_configmap_secrets",
               "k8s_kubelet_api"
@@ -1500,6 +1825,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "9fcef411a25f286d",
+            "severity": "high",
+            "impact": "Read/write host files outside the container via /proc/self/fd symlinks.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem"
+            ],
             "techniques": [
               "proc_fd_symlink_traversal"
             ]
@@ -1542,6 +1873,13 @@
             "confidence-score": 1.0,
             "chain-length": 2,
             "chain-id": "a597da935d7dbd36",
+            "severity": "high",
+            "impact": "Cross-container data exfiltration via shared writable /dev/shm.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Host mounts / filesystem",
+              "Linux capabilities"
+            ],
             "techniques": [
               "tmpfs_shm_cross_container",
               "cap_sys_ptrace"
@@ -1585,6 +1923,12 @@
             "confidence-score": 1.0,
             "chain-length": 1,
             "chain-id": "3dfd65387f06bfdb",
+            "severity": "critical",
+            "impact": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Linux capabilities"
+            ],
             "techniques": [
               "cap_sys_rawio"
             ]
@@ -1627,6 +1971,13 @@
             "confidence-score": 1.0,
             "chain-length": 2,
             "chain-id": "c41808d3fc60f014",
+            "severity": "critical",
+            "impact": "SELinux disabled/unconfined \u2014 removes the MAC layer that contains escapes.",
+            "affected-components": [
+              "Container: system-monitor-deployment-558fc5987d-bzfxv",
+              "Container runtime / orchestrator",
+              "Linux capabilities"
+            ],
             "techniques": [
               "lsm_selinux_unconfined",
               "cap_sys_admin_mount"
@@ -1640,7 +1991,7 @@
       "invocations": [
         {
           "executionSuccessful": true,
-          "endTimeUtc": "2026-05-28T00:56:15.636476+00:00"
+          "endTimeUtc": "2026-05-28T22:09:12.885002+00:00"
         }
       ],
       "originalUriBaseIds": {

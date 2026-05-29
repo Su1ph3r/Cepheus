@@ -1,0 +1,172 @@
+{{- if .Values.tls.selfSigned }}
+{{- $fullname := include "cepheus-admission.fullname" . -}}
+{{- $sa := printf "%s-certgen" $fullname -}}
+{{- $secret := include "cepheus-admission.tlsSecretName" . -}}
+# Self-signed TLS bootstrap. A pre-install/pre-upgrade Job generates a CA
+# + serving cert into the TLS secret; a post-install/post-upgrade Job
+# patches this chart's ValidatingWebhookConfiguration caBundle so the
+# kube-apiserver trusts the self-signed cert. Convenient for
+# kind/minikube; for production prefer cert-manager (tls.certManager).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-certgen
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-certgen
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-certgen
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-certgen-create
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      name: {{ $fullname }}-certgen-create
+      labels:
+        {{- include "cepheus-admission.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: create
+          image: "{{ .Values.tls.selfSignedJob.image }}"
+          imagePullPolicy: {{ .Values.tls.selfSignedJob.pullPolicy }}
+          args:
+            - create
+            - --host={{ $fullname }},{{ $fullname }}.{{ .Release.Namespace }},{{ $fullname }}.{{ .Release.Namespace }}.svc,{{ $fullname }}.{{ .Release.Namespace }}.svc.cluster.local
+            - --namespace={{ .Release.Namespace }}
+            - --secret-name={{ $secret }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-certgen-patch
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cepheus-admission.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  # Retry transient apiserver errors: this Job patches the webhook
+  # caBundle, and a failure here leaves the webhook untrusted (with
+  # failurePolicy=Ignore it would be silently bypassed). Helm reports a
+  # post-install hook failure, but give it a few attempts first.
+  backoffLimit: 3
+  template:
+    metadata:
+      name: {{ $fullname }}-certgen-patch
+      labels:
+        {{- include "cepheus-admission.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: patch
+          image: "{{ .Values.tls.selfSignedJob.image }}"
+          imagePullPolicy: {{ .Values.tls.selfSignedJob.pullPolicy }}
+          args:
+            - patch
+            - --webhook-name={{ $fullname }}
+            - --namespace={{ .Release.Namespace }}
+            - --secret-name={{ $secret }}
+            - --patch-mutating=false
+            - --patch-validating=true
+            - --patch-failure-policy={{ .Values.webhookConfig.failurePolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

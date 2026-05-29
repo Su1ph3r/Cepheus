@@ -361,3 +361,34 @@ def test_empty_string_kernel_version_raises():
 
     with pytest.raises(ValueError, match="empty string"):
         posture_from_podspec({"containers": [{"name": "app"}]}, kernel_version="")
+
+
+def test_malformed_podspec_does_not_crash():
+    """A malformed/adversarial PodSpec (non-list containers, non-dict
+    entries, non-string runtimeClassName, non-dict volume) must not raise
+    — in the admission path that would surface as an HTTP 500 instead of
+    a gate decision. The importer coerces defensively."""
+    # Non-list containers + non-dict container entry + bad runtimeClassName + bad volume.
+    posture = posture_from_podspec(
+        {
+            "containers": {"name": "not-a-list"},  # dict, not list
+            "initContainers": ["string-not-dict"],  # list with non-dict entry
+            "runtimeClassName": {"weird": 1},  # non-string
+            "volumes": ["not-a-dict", {"hostPath": "not-a-dict"}],
+        }
+    )
+    # Coerced to an empty/benign posture rather than crashing.
+    assert posture is not None
+    assert posture.runtime.privileged is False
+
+
+def test_well_formed_podspec_still_parses_after_hardening():
+    """The robustness coercion must not change behavior for valid input."""
+    posture = posture_from_podspec(
+        {
+            "containers": [{"name": "app", "securityContext": {"privileged": True}}],
+            "runtimeClassName": "gvisor",
+        }
+    )
+    assert posture.runtime.privileged is True
+    assert posture.runtime.sandbox_runtime == "gvisor"

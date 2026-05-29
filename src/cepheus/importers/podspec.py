@@ -162,8 +162,10 @@ def _hostpath_volumes(spec: dict) -> list[dict]:
     """
     out = []
     for vol in spec.get("volumes") or []:
+        if not isinstance(vol, dict):
+            continue
         host = vol.get("hostPath")
-        if host:
+        if isinstance(host, dict):
             out.append(
                 {
                     "name": vol.get("name", ""),
@@ -240,7 +242,8 @@ def _detect_sandbox_runtime(spec: dict) -> str | None:
     runtimes: gvisor, kata, firecracker. Anything else is treated as
     "unknown" (returns None) — the matcher won't apply the sandbox
     mitigation factor."""
-    rcn = (spec.get("runtimeClassName") or "").lower()
+    rcn_raw = spec.get("runtimeClassName")
+    rcn = rcn_raw.lower() if isinstance(rcn_raw, str) else ""
     if not rcn:
         return None
     if "gvisor" in rcn or "runsc" in rcn:
@@ -316,7 +319,21 @@ def posture_from_podspec(
         analyzer's ``confidence_if_absent`` logic handles them as
         unknown rather than explicitly absent.
     """
-    containers = (spec.get("containers") or []) + (spec.get("initContainers") or [])
+    # Coerce defensively: a malformed PodSpec (non-list containers, or
+    # non-dict entries) must not crash the importer — in the admission
+    # path that would surface as an HTTP 500 instead of a gate decision.
+    # The apiserver schema-validates PodSpecs upstream, so this is
+    # defense-in-depth for direct/fuzzed callers.
+    raw_containers = spec.get("containers")
+    raw_init = spec.get("initContainers")
+    containers = [
+        c
+        for c in (
+            (raw_containers if isinstance(raw_containers, list) else [])
+            + (raw_init if isinstance(raw_init, list) else [])
+        )
+        if isinstance(c, dict)
+    ]
 
     any_privileged = any(_container_is_privileged(c) for c in containers)
     union_caps: set[str] = set()

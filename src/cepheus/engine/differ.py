@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from cepheus.config import CepheusConfig
 from cepheus.models.posture import ContainerPosture
@@ -47,7 +47,18 @@ class DiffResult(BaseModel):
     chain_deltas: list[ChainDelta] = Field(default_factory=list)
     before_summary: ScoreSummary = Field(default_factory=ScoreSummary)
     after_summary: ScoreSummary = Field(default_factory=ScoreSummary)
-    improved: bool = True
+    # `improved` is STRICT: at least one metric strictly better and none
+    # worse. An unchanged posture is `unchanged`, not `improved`.
+    improved: bool = False
+    unchanged: bool = True
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def verdict(self) -> str:
+        """Three-state posture verdict: 'improved', 'unchanged', or 'regressed'."""
+        if self.unchanged:
+            return "unchanged"
+        return "improved" if self.improved else "regressed"
 
 
 def _build_summary(result) -> ScoreSummary:
@@ -248,18 +259,25 @@ def diff_postures(
     before_summary = _build_summary(before_result)
     after_summary = _build_summary(after_result)
 
-    # Determine if security posture improved
-    # Requires at least one metric to strictly improve, with no metric regressing
-    if before_summary.total_chains == 0 and after_summary.total_chains == 0:
-        improved = True
-    else:
-        no_regression = (
-            after_summary.max_score <= before_summary.max_score
-            and after_summary.total_chains <= before_summary.total_chains
-            and after_summary.critical_chains <= before_summary.critical_chains
-            and after_summary.high_chains <= before_summary.high_chains
-        )
-        improved = no_regression
+    # Determine the posture verdict. `improved` is strict: no metric
+    # regressed AND at least one metric strictly improved. `unchanged`
+    # means every tracked metric is identical (incl. the no-chains case,
+    # which is unchanged — not an improvement).
+    before_metrics = (
+        before_summary.max_score,
+        before_summary.total_chains,
+        before_summary.critical_chains,
+        before_summary.high_chains,
+    )
+    after_metrics = (
+        after_summary.max_score,
+        after_summary.total_chains,
+        after_summary.critical_chains,
+        after_summary.high_chains,
+    )
+    unchanged = after_metrics == before_metrics
+    no_regression = all(a <= b for a, b in zip(after_metrics, before_metrics))
+    improved = no_regression and not unchanged
 
     return DiffResult(
         posture_deltas=posture_deltas,
@@ -268,4 +286,5 @@ def diff_postures(
         before_summary=before_summary,
         after_summary=after_summary,
         improved=improved,
+        unchanged=unchanged,
     )

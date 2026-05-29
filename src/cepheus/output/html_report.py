@@ -264,7 +264,7 @@ def generate_html(result: AnalysisResult) -> str:
     try:
         from jinja2 import Environment
     except ImportError:
-        raise ImportError("jinja2 is required for HTML reports. Install it with: pip install cepheus[html]")
+        raise ImportError("jinja2 is required for HTML reports. Install it with: pip install 'cepheus-engine[html]'")
 
     from markupsafe import Markup, escape
 

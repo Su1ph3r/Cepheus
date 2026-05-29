@@ -112,3 +112,21 @@ jobs:
         # in R2 alongside the planned enumerator expansion so we audit
         # findings in one pass instead of trickling them in.
         run: dash -n src/cepheus/enumerator/cepheus-enum.sh
+
+  web-tests:
+    name: web viewer (node:test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22: `node --test` glob-pattern support landed in Node 21.
+          # On Node 20 the quoted glob matches nothing and the suite is a
+          # silent no-op, so the gate must run on 21+.
+          node-version: "22"
+
+      - name: Run viewer unit tests
+        # Zero-dependency: the viewer's pure helpers are unit-tested with
+        # Node's built-in test runner — no package.json / node_modules.
+        run: node --test "web/**/*.test.js"

@@ -38,7 +38,13 @@ def print_diff_result(diff: DiffResult, output_console: Console | None = None) -
     """Print the posture diff result using Rich formatting."""
     c = output_console if output_console is not None else console
     # Summary panel
-    verdict = Text("IMPROVED", style="bold green") if diff.improved else Text("REGRESSED", style="bold red")
+    _VERDICT_STYLE = {
+        "improved": ("IMPROVED", "bold green"),
+        "unchanged": ("UNCHANGED", "bold yellow"),
+        "regressed": ("REGRESSED", "bold red"),
+    }
+    label, style = _VERDICT_STYLE[diff.verdict]
+    verdict = Text(label, style=style)
 
     summary_lines = [
         "                   BEFORE    AFTER",

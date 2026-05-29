@@ -1,3 +1,4 @@
+{{- include "cepheus-admission.validateTls" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -64,6 +65,9 @@ spec:
             {{- else }}
             - --fail-closed
             {{- end }}
+            {{- if .Values.mtls.clientCASecret }}
+            - --client-ca=/etc/cepheus/clientca/ca.crt
+            {{- end }}
           ports:
             - name: webhook
               containerPort: 8443
@@ -78,6 +82,11 @@ spec:
             {{- if .Values.baseline.contents }}
             - name: baseline
               mountPath: /etc/cepheus/baseline
+              readOnly: true
+            {{- end }}
+            {{- if .Values.mtls.clientCASecret }}
+            - name: clientca
+              mountPath: /etc/cepheus/clientca
               readOnly: true
             {{- end }}
             # readOnlyRootFilesystem requires writable /tmp for Python's
@@ -98,6 +107,11 @@ spec:
         - name: baseline
           configMap:
             name: {{ include "cepheus-admission.fullname" . }}-baseline
+        {{- end }}
+        {{- if .Values.mtls.clientCASecret }}
+        - name: clientca
+          secret:
+            secretName: {{ .Values.mtls.clientCASecret }}
         {{- end }}
         - name: tmp
           emptyDir:

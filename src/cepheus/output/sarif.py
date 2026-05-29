@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from cepheus import __version__
 from cepheus.models.result import AnalysisResult
-from cepheus.models.technique import Severity
+from cepheus.models.technique import Severity, TechniqueCategory
 
 SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
@@ -44,6 +44,71 @@ SEVERITY_TO_SECURITY_SEVERITY: dict[Severity, str] = {
 }
 
 
+# Human labels for the subsystem each technique category abuses — used to
+# build the per-finding "affected components" list for SARIF consumers
+# (the web viewer, dashboards). Structural, so it needs no per-technique
+# authoring.
+_CATEGORY_COMPONENT: dict[TechniqueCategory, str] = {
+    TechniqueCategory.CAPABILITY: "Linux capabilities",
+    TechniqueCategory.MOUNT: "Host mounts / filesystem",
+    TechniqueCategory.KERNEL: "Host kernel",
+    TechniqueCategory.RUNTIME: "Container runtime / orchestrator",
+    TechniqueCategory.INFO_DISCLOSURE: "Exposed secrets / metadata",
+    TechniqueCategory.COMBINATORIAL: "Multiple subsystems",
+}
+
+# Fallback impact when a technique carries no curated ``impact`` (see the
+# _IMPACT side-car in engine/technique_db.py). Keyed by the chain's
+# severity so the statement still scales honestly with the finding.
+_IMPACT_BY_SEVERITY: dict[Severity, str] = {
+    Severity.CRITICAL: "Full container escape — code execution on the host/node.",
+    Severity.HIGH: "Container escape or host-level compromise.",
+    Severity.MEDIUM: "Privilege escalation or partial host access within the container boundary.",
+    Severity.LOW: "Weakened isolation or information disclosure that aids further attacks.",
+}
+
+
+def _resolve_impact(chain: Any) -> str:
+    """The chain's impact: the lead technique's curated ``impact`` when set,
+    else a severity-derived fallback so the field is never blank."""
+    lead = chain.steps[0].technique
+    if getattr(lead, "impact", ""):
+        return lead.impact
+    return _IMPACT_BY_SEVERITY.get(chain.severity, _IMPACT_BY_SEVERITY[Severity.MEDIUM])
+
+
+def _affected_components(chain: Any, posture_hostname: str | None) -> list[str]:
+    """Assets/subsystems this chain puts at risk: the container itself plus
+    the distinct subsystems its techniques abuse (capabilities, host mounts,
+    kernel, runtime, …). Order is stable — container first, then subsystems
+    in chain order."""
+    container = f"Container: {posture_hostname}" if posture_hostname else "Container"
+    components: list[str] = [container]
+    seen: set[str] = set()
+    for step in chain.steps:
+        label = _CATEGORY_COMPONENT.get(step.technique.category)
+        if label and label not in seen:
+            seen.add(label)
+            components.append(label)
+    return components
+
+
+def _remediation_text(technique: Any) -> str:
+    """Operator-facing recommendation: the technique's remediation, enriched
+    with the precise container-runtime flag that closes the primitive when
+    one exists. Never empty, so SARIF consumers can show a Recommendation
+    field unconditionally."""
+    rem = (technique.remediation or "").strip()
+    flag = (technique.cli_flag or "").strip()
+    if rem and flag and flag not in rem:
+        return f"{rem} (runtime flag: {flag})"
+    if rem:
+        return rem
+    if flag:
+        return f"Apply {flag} at container create time."
+    return "See the technique description and references."
+
+
 def _technique_to_rule(technique: Any) -> dict[str, Any]:
     """Build a SARIF `reportingDescriptor` (a rule definition) from a Cepheus
     EscapeTechnique. One per unique technique; deduplicated by caller."""
@@ -64,6 +129,9 @@ def _technique_to_rule(technique: Any) -> dict[str, Any]:
             "precision": "high",
         },
     }
+    rule["properties"]["remediation"] = _remediation_text(technique)
+    if technique.impact:
+        rule["properties"]["impact"] = technique.impact
     if technique.cve:
         rule["properties"]["cve"] = technique.cve
     if technique.mitre_attack:
@@ -105,7 +173,7 @@ def _rule_markdown(technique: Any) -> str:
     return "\n".join(parts)
 
 
-def _chain_to_result(chain: Any, posture_uri: str) -> dict[str, Any]:
+def _chain_to_result(chain: Any, posture_uri: str, posture_hostname: str | None) -> dict[str, Any]:
     """Build a SARIF `result` (a finding) from an EscapeChain. Uses the
     top-of-chain technique's rule id; the chain narrative is in the
     message text.
@@ -162,6 +230,16 @@ def _chain_to_result(chain: Any, posture_uri: str) -> dict[str, Any]:
             "confidence-score": chain.confidence_score,
             "chain-length": len(chain.steps),
             "chain-id": chain.id,
+            # The exact Cepheus severity, so consumers (the web viewer)
+            # don't have to re-derive it from the score/level — the SARIF
+            # level collapses CRITICAL+HIGH into "error".
+            "severity": chain.severity.value,
+            # The consequence (end-state) and the assets/subsystems at risk,
+            # so finding consumers can render Impact + Affected Component(s)
+            # without re-deriving them. Impact falls back to a severity-based
+            # statement when the lead technique carries no curated impact.
+            "impact": _resolve_impact(chain),
+            "affected-components": _affected_components(chain, posture_hostname),
             "techniques": [step.technique.id for step in chain.steps],
         },
         "partialFingerprints": {
@@ -252,7 +330,7 @@ def generate_sarif(result: AnalysisResult) -> dict[str, Any]:
     posture_uri = f"container://{safe_hostname}"
 
     # Drop degenerate empty-step chains rather than crash the writer.
-    results = [_chain_to_result(chain, posture_uri) for chain in result.chains if chain.steps]
+    results = [_chain_to_result(chain, posture_uri, result.posture.hostname) for chain in result.chains if chain.steps]
 
     return {
         "$schema": SARIF_SCHEMA,

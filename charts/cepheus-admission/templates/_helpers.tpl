@@ -56,3 +56,19 @@ otherwise the chart-managed self-signed issuer.
 {{- printf "%s-selfsigned" (include "cepheus-admission.fullname" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Validate that EXACTLY ONE TLS mode is configured. The three modes
+(cert-manager, existing secret, self-signed Job) are mutually exclusive
+— enabling two would double-provision the TLS secret / caBundle. Fails
+the render with an actionable message otherwise.
+*/}}
+{{- define "cepheus-admission.validateTls" -}}
+{{- $modes := list -}}
+{{- if .Values.tls.certManager.enabled -}}{{- $modes = append $modes "certManager.enabled" -}}{{- end -}}
+{{- if .Values.tls.existingSecret -}}{{- $modes = append $modes "existingSecret" -}}{{- end -}}
+{{- if .Values.tls.selfSigned -}}{{- $modes = append $modes "selfSigned" -}}{{- end -}}
+{{- if ne (len $modes) 1 -}}
+{{- fail (printf "tls: exactly one of certManager.enabled / existingSecret / selfSigned must be set (currently set: %v)" $modes) -}}
+{{- end -}}
+{{- end -}}

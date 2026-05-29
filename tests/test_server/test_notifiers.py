@@ -12,6 +12,7 @@ from cepheus.server.notifiers import (
     _redact,
     _slack_payload,
     _TokenBucket,
+    _webhook_payload,
     notify,
 )
 
@@ -86,10 +87,10 @@ def test_notify_dispatches_on_background_thread(monkeypatch):
         calls.append((url, body))
 
     monkeypatch.setattr("cepheus.server.notifiers._post_json", _fake_post)
-    # Reset the global rate bucket so prior tests' consumption doesn't
-    # cause this dispatch to be dropped.
+    # Reset the DENY rate bucket (the event is a DENY) so prior tests'
+    # consumption doesn't cause this dispatch to be dropped.
     monkeypatch.setattr(
-        "cepheus.server.notifiers._GLOBAL_BUCKET",
+        "cepheus.server.notifiers._DENY_BUCKET",
         _TokenBucket(max_tokens=10, refill_per_sec=10),
     )
 
@@ -125,7 +126,7 @@ def test_notify_drops_when_rate_limited(monkeypatch):
 
     monkeypatch.setattr("cepheus.server.notifiers._post_json", _fake_post)
     monkeypatch.setattr(
-        "cepheus.server.notifiers._GLOBAL_BUCKET",
+        "cepheus.server.notifiers._DENY_BUCKET",
         _TokenBucket(max_tokens=0, refill_per_sec=0),  # Permanently empty
     )
 
@@ -135,3 +136,79 @@ def test_notify_drops_when_rate_limited(monkeypatch):
     # Brief settle period — nothing should be enqueued.
     time.sleep(0.05)
     assert calls == []
+
+
+def test_notifier_config_enabled_when_webhook_set():
+    assert NotifierConfig(webhook_url="https://example.com/hook").any_enabled is True
+
+
+def test_webhook_payload_is_flat_json():
+    body = _webhook_payload(_ev("DENY"))
+    assert body["decision"] == "DENY"
+    assert body["namespace"] == "prod"
+    assert body["pod"] == "api-7c4f"
+    assert body["chain_count"] == 2
+    assert body["source"] == "cepheus-admission"
+
+
+def test_generic_webhook_channel_dispatches(monkeypatch):
+    """A configured webhook_url must receive the generic JSON payload."""
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr("cepheus.server.notifiers._post_json", lambda url, body: calls.append((url, body)))
+    monkeypatch.setattr(
+        "cepheus.server.notifiers._DENY_BUCKET",
+        _TokenBucket(max_tokens=10, refill_per_sec=10),
+    )
+    notify(_ev("DENY"), NotifierConfig(webhook_url="https://example.com/hook"))
+    for t in threading.enumerate():
+        if t.name.startswith("cepheus-notify-"):
+            t.join(timeout=1.0)
+    assert any(url == "https://example.com/hook" for url, _ in calls)
+
+
+def test_deny_and_warn_ceilings_are_independent(monkeypatch):
+    """A drained WARN bucket must NOT block DENY delivery — DENY alerts
+    are security-critical and have their own ceiling."""
+    calls: list[str] = []
+    monkeypatch.setattr("cepheus.server.notifiers._post_json", lambda url, body: calls.append(url))
+    # WARN bucket empty, DENY bucket healthy.
+    monkeypatch.setattr("cepheus.server.notifiers._WARN_BUCKET", _TokenBucket(max_tokens=0, refill_per_sec=0))
+    monkeypatch.setattr("cepheus.server.notifiers._DENY_BUCKET", _TokenBucket(max_tokens=10, refill_per_sec=10))
+
+    cfg = NotifierConfig(webhook_url="https://example.com/hook")
+    notify(_ev("WARN"), cfg)  # dropped (WARN bucket empty)
+    notify(_ev("DENY"), cfg)  # must still dispatch
+    for t in threading.enumerate():
+        if t.name.startswith("cepheus-notify-"):
+            t.join(timeout=1.0)
+    assert calls == ["https://example.com/hook"]
+
+
+def test_cli_notify_dispatches(monkeypatch):
+    """`cepheus notify` builds an event and dispatches it through the
+    configured channel."""
+    from typer.testing import CliRunner
+
+    from cepheus.cli import app
+
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr("cepheus.server.notifiers._post_json", lambda url, body: calls.append((url, body)))
+    monkeypatch.setattr("cepheus.server.notifiers._DENY_BUCKET", _TokenBucket(max_tokens=10, refill_per_sec=10))
+
+    result = CliRunner().invoke(
+        app,
+        ["notify", "-n", "prod", "-p", "api", "--webhook-url", "https://example.com/h", "--reason", "test"],
+    )
+    assert result.exit_code == 0, result.output
+    assert any(url == "https://example.com/h" for url, _ in calls)
+
+
+def test_cli_notify_requires_a_channel():
+    """With no channel configured, `cepheus notify` exits non-zero."""
+    from typer.testing import CliRunner
+
+    from cepheus.cli import app
+
+    result = CliRunner().invoke(app, ["notify", "-n", "prod", "-p", "api"])
+    assert result.exit_code == 2
+    assert "No notification channel" in result.output

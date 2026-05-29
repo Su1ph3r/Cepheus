@@ -28,8 +28,18 @@ webhooks:
       {{- end }}
     rules:
       {{- toYaml .Values.webhookConfig.rules | nindent 6 }}
+    # Always exclude Cepheus's own release namespace from gating, on top
+    # of whatever the operator configured. Installing into e.g.
+    # cepheus-system otherwise leaves the webhook gating its own pods —
+    # with failurePolicy: Fail a full-replica outage would then deadlock
+    # the webhook's own recreation. matchExpressions are ANDed, so this
+    # exclusion is purely additive to the operator's selector.
     namespaceSelector:
-      {{- toYaml .Values.webhookConfig.namespaceSelector | nindent 6 }}
+      {{- $sel := deepCopy .Values.webhookConfig.namespaceSelector }}
+      {{- $ownNs := dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" (list .Release.Namespace) }}
+      {{- $exprs := append (default (list) $sel.matchExpressions) $ownNs }}
+      {{- $_ := set $sel "matchExpressions" $exprs }}
+      {{- toYaml $sel | nindent 6 }}
     failurePolicy: {{ .Values.webhookConfig.failurePolicy }}
     matchPolicy: {{ .Values.webhookConfig.matchPolicy }}
     sideEffects: {{ .Values.webhookConfig.sideEffects }}

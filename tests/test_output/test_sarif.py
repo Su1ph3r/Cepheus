@@ -129,8 +129,10 @@ def test_poc_with_backtick_fence_does_not_break_markdown(sample_analysis_result)
     PoC strings containing triple-backtick sequences must be sanitized
     so they can't escape the embedding ```sh fence and inject
     arbitrary markdown into the Code Scanning UI."""
-    # Mutate the sample chain's poc to include a fence-break attempt.
-    sample_analysis_result.chains[0].steps[0].poc_command = "echo safe\n```\n# injected"
+    # ChainStep is frozen — rebuild it with a fence-break attempt in its
+    # poc and replace it in the chain's (mutable) step list.
+    chain = sample_analysis_result.chains[0]
+    chain.steps[0] = chain.steps[0].model_copy(update={"poc_command": "echo safe\n```\n# injected"})
     sarif = generate_sarif(sample_analysis_result)
     md = sarif["runs"][0]["results"][0]["message"]["markdown"]
     # The PoC fence opens with ```sh and closes with ```. Our sanitizer
@@ -176,8 +178,9 @@ def test_long_backtick_run_does_not_escape_code_fence(sample_analysis_result):
     early AND open a new code-injection block. The hardened regex
     `^\\s{0,3}`{3,}` collapses ANY 3+-backtick run so only the
     legitimate ```sh ... ``` pair remains."""
-    sample_analysis_result.chains[0].steps[0].poc_command = (
-        "echo safe\n" + ("`" * 10) + "\n# injected after fence break"
+    chain = sample_analysis_result.chains[0]
+    chain.steps[0] = chain.steps[0].model_copy(
+        update={"poc_command": "echo safe\n" + ("`" * 10) + "\n# injected after fence break"}
     )
     sarif = generate_sarif(sample_analysis_result)
     md = sarif["runs"][0]["results"][0]["message"]["markdown"]
@@ -200,7 +203,8 @@ def test_indented_backtick_fence_collapsed(sample_analysis_result):
     """Regression guard for L2: CommonMark allows up to 3 spaces before
     a closing fence. Pre-0.3.5 the regex `^```` rejected `   ```` because
     of the leading spaces."""
-    sample_analysis_result.chains[0].steps[0].poc_command = "echo safe\n   ```\n# injected"
+    chain = sample_analysis_result.chains[0]
+    chain.steps[0] = chain.steps[0].model_copy(update={"poc_command": "echo safe\n   ```\n# injected"})
     sarif = generate_sarif(sample_analysis_result)
     md = sarif["runs"][0]["results"][0]["message"]["markdown"]
     # The indented backtick run is collapsed to indented tildes.

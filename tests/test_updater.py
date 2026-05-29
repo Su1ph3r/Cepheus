@@ -11,8 +11,10 @@ from cepheus.updater import (
     ReleaseInfo,
     UpdateCheckError,
     _parse_version,
+    detect_install_method,
     fetch_latest_release,
     is_newer,
+    upgrade_command,
 )
 
 
@@ -101,3 +103,102 @@ def test_fetch_latest_release_rejects_non_json(monkeypatch):
     )
     with pytest.raises(UpdateCheckError, match="not valid UTF-8 JSON"):
         fetch_latest_release()
+
+
+@pytest.mark.parametrize(
+    ("module_path", "expected"),
+    [
+        ("/usr/lib/python3.13/site-packages/cepheus/updater.py", "pip"),
+        ("/usr/lib/python3/dist-packages/cepheus/updater.py", "pip"),
+        ("/home/u/.local/pipx/venvs/cepheus-engine/lib/cepheus/updater.py", "pipx"),
+        ("/opt/homebrew/Cellar/cepheus/1.0.0/libexec/cepheus/updater.py", "brew"),
+        ("C:/Users/u/scoop/apps/cepheus/current/cepheus/updater.py", "scoop"),
+        ("/some/random/checkout/src/cepheus/updater.py", "unknown"),
+    ],
+)
+def test_detect_install_method(monkeypatch, module_path, expected):
+    monkeypatch.setattr("cepheus.updater.__file__", module_path)
+    monkeypatch.setattr("cepheus.updater.sys.executable", "/usr/bin/python3")
+    monkeypatch.setattr("cepheus.updater.sys.frozen", False, raising=False)
+    monkeypatch.delenv("PIPX_HOME", raising=False)
+    assert detect_install_method() == expected
+
+
+def test_detect_install_method_frozen_binary(monkeypatch):
+    monkeypatch.setattr("cepheus.updater.sys.frozen", True, raising=False)
+    assert detect_install_method() == "binary"
+
+
+def test_upgrade_command_per_method():
+    assert upgrade_command("pipx") == ["pipx", "upgrade", "cepheus-engine"]
+    assert upgrade_command("brew") == ["brew", "upgrade", "su1ph3r/tap/cepheus"]
+    assert upgrade_command("scoop") == ["scoop", "update", "cepheus"]
+    assert upgrade_command("pip")[:3] == [__import__("sys").executable, "-m", "pip"]
+    # No self-upgrade for binary / unknown installs.
+    assert upgrade_command("binary") is None
+    assert upgrade_command("unknown") is None
+
+
+def test_update_apply_runs_detected_command(monkeypatch):
+    """`cepheus update --apply` should detect the install method and run
+    the upgrade command after confirmation."""
+    import subprocess as _sp
+
+    from typer.testing import CliRunner
+
+    import cepheus.updater as up
+    from cepheus.cli import app
+
+    monkeypatch.setattr(
+        up,
+        "fetch_latest_release",
+        lambda *a, **k: ReleaseInfo(
+            tag="v999.0.0", name="999", html_url="https://example.com", published_at="", prerelease=False
+        ),
+    )
+    monkeypatch.setattr(up, "detect_install_method", lambda: "pip")
+    monkeypatch.setattr(up, "upgrade_command", lambda m: ["py", "-m", "pip", "install", "--upgrade", "cepheus-engine"])
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return _sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = CliRunner().invoke(app, ["update", "--apply"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert captured.get("cmd") == ["py", "-m", "pip", "install", "--upgrade", "cepheus-engine"]
+
+
+def test_update_apply_declined_does_not_run(monkeypatch):
+    """Declining the confirmation must NOT run any command."""
+    import subprocess as _sp
+
+    from typer.testing import CliRunner
+
+    import cepheus.updater as up
+    from cepheus.cli import app
+
+    monkeypatch.setattr(
+        up,
+        "fetch_latest_release",
+        lambda *a, **k: ReleaseInfo(
+            tag="v999.0.0", name="999", html_url="https://example.com", published_at="", prerelease=False
+        ),
+    )
+    monkeypatch.setattr(up, "detect_install_method", lambda: "pip")
+    monkeypatch.setattr(up, "upgrade_command", lambda m: ["py", "-m", "pip", "install", "--upgrade", "cepheus-engine"])
+
+    ran = {"called": False}
+
+    def fake_run(cmd, **kw):
+        ran["called"] = True
+        return _sp.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = CliRunner().invoke(app, ["update", "--apply"], input="n\n")
+    assert ran["called"] is False
+    assert "cancelled" in result.output.lower()

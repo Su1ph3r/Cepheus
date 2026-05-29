@@ -41,13 +41,36 @@ def test_techniques_without_mapping_have_empty_lists():
 
 
 def test_at_least_a_starter_set_is_populated():
-    """Don't let the crosswalk shrink below a meaningful starter set —
-    if someone clears it accidentally during a refactor, this fails."""
+    """Don't let the crosswalk shrink below a meaningful set — if someone
+    clears it accidentally during a refactor, this fails."""
     populated = sum(1 for t in get_all_techniques() if t.cis_kubernetes_benchmark)
-    assert populated >= 15, (
-        f"Only {populated} techniques have CIS mappings; expected >= 15 "
-        f"(the starter set covers capability/socket/mount/secret families)."
+    assert populated >= 30, (
+        f"Only {populated} techniques have CIS mappings; expected >= 30 "
+        f"(covers capability/socket/mount/cgroup/device/secret families)."
     )
+
+
+def test_mount_and_capability_families_are_mapped():
+    """The mount, device, cgroup, and capability/eBPF families must all
+    carry compliance mappings — kernel CVEs are intentionally exempt, but
+    these configuration-level techniques map cleanly to CIS controls."""
+    must_be_mapped = [
+        "cgroupfs_escape",
+        "systemd_cgroup_injection",
+        "devfs_access",
+        "device_mapper_access",
+        "sysfs_hugepages",
+        "tmpfs_shm_cross_container",
+        "vm_param_manipulation",
+        "proc_fd_symlink_traversal",
+        "ebpf_probe_write_user",
+    ]
+    for tid in must_be_mapped:
+        t = get_technique_by_id(tid)
+        assert t is not None, f"technique {tid!r} not found — id renamed?"
+        assert t.cis_kubernetes_benchmark, f"{tid} should carry a CIS mapping"
+        assert t.nist_800_190, f"{tid} should carry a NIST mapping"
+        assert t.pci_dss, f"{tid} should carry a PCI-DSS mapping"
 
 
 def test_sarif_emits_compliance_fields_when_populated():

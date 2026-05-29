@@ -9,12 +9,20 @@ from cepheus.config import CepheusConfig
 from cepheus.models.posture import ContainerPosture
 from cepheus.models.technique import EscapeTechnique, Prerequisite
 
-# Check types that key off the host kernel version alone. When a technique's
+# Check types that key off the host KERNEL version alone. When a technique's
 # prerequisites are exclusively these, the match is opportunistic: we know the
 # host kernel is *in the published vulnerable range*, but we have not verified
 # the specific vulnerable component is present/reachable or that the kernel
 # binary isn't patched (distro backports). See P2/P3 in cepheus-precision-design.md.
-_KERNEL_ONLY_CHECK_TYPES = {"kernel_gte", "kernel_lte", "kernel_between", "version_lte"}
+#
+# `version_lte` is deliberately NOT here: it checks a *specific component's*
+# version (e.g. runtime.runc_version, gpu.nvidia_toolkit_version), so a match
+# means the vulnerable component version was directly observed — a high-
+# confidence finding, not an opportunistic kernel-range guess. It must not be
+# subject to the distro-kernel backport downgrade (kernel backports don't patch
+# the runc/toolkit binary). The unknown-version case is handled by each
+# prerequisite's own confidence_if_absent instead.
+_KERNEL_ONLY_CHECK_TYPES = {"kernel_gte", "kernel_lte", "kernel_between"}
 
 # Substrings/regexes that identify a distro/vendor kernel that actively backports
 # upstream security patches. When detected, kernel-range-only CVE matches are
@@ -142,30 +150,44 @@ def evaluate_prerequisite(posture: ContainerPosture, prereq: Prerequisite) -> fl
     if check == "not_equals":
         return prereq.confidence_if_met if value != prereq.check_value else 0.0
 
-    if check == "gte":
+    if check in ("gte", "lte"):
+        # Reject bool explicitly (float(True) == 1.0 would silently
+        # satisfy a numeric threshold) and any non-numeric type, treating
+        # them as "unknown" rather than a spurious match/miss.
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return prereq.confidence_if_absent
         try:
-            return prereq.confidence_if_met if float(value) >= float(prereq.check_value) else 0.0
+            v, target = float(value), float(prereq.check_value)
         except (TypeError, ValueError):
             return prereq.confidence_if_absent
-
-    if check == "lte":
-        try:
-            return prereq.confidence_if_met if float(value) <= float(prereq.check_value) else 0.0
-        except (TypeError, ValueError):
-            return prereq.confidence_if_absent
+        ok = v >= target if check == "gte" else v <= target
+        return prereq.confidence_if_met if ok else 0.0
 
     if check == "kernel_gte":
         kt = _kernel_tuple(posture)
+        # An unparseable/unknown kernel parses to (0,0,0); treat as
+        # "kernel unknown" (confidence_if_absent) rather than letting the
+        # comparison produce a spurious definitive result. Mirrors the
+        # version_lte guard below.
+        if kt == (0, 0, 0):
+            return prereq.confidence_if_absent
         target = _parse_kernel_version(str(prereq.check_value))
         return prereq.confidence_if_met if kt >= target else 0.0
 
     if check == "kernel_lte":
         kt = _kernel_tuple(posture)
+        if kt == (0, 0, 0):
+            # Without this guard, (0,0,0) <= any target is always True —
+            # a malformed kernel version would FALSE-POSITIVE every
+            # "kernel <= X" CVE gate.
+            return prereq.confidence_if_absent
         target = _parse_kernel_version(str(prereq.check_value))
         return prereq.confidence_if_met if kt <= target else 0.0
 
     if check == "kernel_between":
         kt = _kernel_tuple(posture)
+        if kt == (0, 0, 0):
+            return prereq.confidence_if_absent
         if not isinstance(prereq.check_value, list) or len(prereq.check_value) != 2:
             return prereq.confidence_if_absent
         low = _parse_kernel_version(str(prereq.check_value[0]))
@@ -218,7 +240,7 @@ def match_technique(
 
     Precision controls (config-driven, applied AFTER averaging):
     - If all prerequisites are kernel-version checks (kernel_gte / kernel_lte /
-      kernel_between / version_lte) — i.e. the match is "kernel is in vulnerable
+      kernel_between) — i.e. the match is "kernel is in vulnerable
       range" with no other gating — cap the resulting confidence at
       `config.kernel_only_max_confidence` (default 0.5). This keeps the
       technique visible but ranked below techniques that confirm a specific

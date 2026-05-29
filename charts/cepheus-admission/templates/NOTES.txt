@@ -35,8 +35,8 @@ Test the gate with a privileged pod (should be DENIED if gate.maxSeverity is set
 
   kubectl run cepheus-gate-test --image=nginx --privileged --rm -i --tty -- echo ok
 
-The webhook's own pods are EXCLUDED from gating (kubernetes.io/metadata.name
-NotIn kube-system by default) — extend `webhookConfig.namespaceSelector` to
-exclude more namespaces if needed.
+The webhook's own release namespace ({{ .Release.Namespace }}) is always
+excluded from gating, and kube-system is excluded by default. Extend
+`webhookConfig.namespaceSelector` to exclude additional namespaces if needed.
 
 Full operator guide: https://github.com/Su1ph3r/Cepheus/blob/main/docs/ADMISSION.md

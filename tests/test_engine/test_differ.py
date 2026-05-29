@@ -11,14 +11,36 @@ from cepheus.models.posture import (
 
 
 def test_diff_identical_postures():
-    """Diffing identical postures should show no changes and not be marked as regressed."""
+    """Diffing identical postures must report UNCHANGED, not improved."""
     from cepheus.engine.differ import diff_postures
 
     posture = ContainerPosture(hostname="test")
     result = diff_postures(posture, posture)
     assert result.posture_deltas == []
-    # Identical postures — nothing regressed, so improved should be True
-    assert result.improved is True
+    # Identical postures: nothing changed → unchanged, NOT improved.
+    assert result.unchanged is True
+    assert result.improved is False
+    assert result.verdict == "unchanged"
+
+
+def test_diff_regressed_posture():
+    """Adding escape surface must report REGRESSED (improved False)."""
+    from cepheus.engine.differ import diff_postures
+
+    before = ContainerPosture(
+        capabilities=CapabilityInfo(effective=[]),
+        security=SecurityProfile(seccomp="filtering"),
+    )
+    after = ContainerPosture(
+        capabilities=CapabilityInfo(effective=["CAP_SYS_ADMIN"]),
+        security=SecurityProfile(seccomp="disabled"),
+        runtime=RuntimeInfo(privileged=True),
+        network=NetworkInfo(can_reach_docker_sock=True),
+    )
+    result = diff_postures(before, after)
+    assert result.improved is False
+    assert result.unchanged is False
+    assert result.verdict == "regressed"
 
 
 def test_diff_remediated_techniques():
@@ -90,6 +112,8 @@ def test_diff_improvement_flag():
     )
     result = diff_postures(privileged, hardened)
     assert result.improved is True
+    assert result.unchanged is False
+    assert result.verdict == "improved"
 
 
 def test_diff_serialization():
@@ -103,3 +127,5 @@ def test_diff_serialization():
     assert "technique_deltas" in data
     assert "chain_deltas" in data
     assert "improved" in data
+    assert "unchanged" in data
+    assert data["verdict"] == "unchanged"

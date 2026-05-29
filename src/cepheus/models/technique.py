@@ -56,6 +56,15 @@ class EscapeTechnique(BaseModel):
     reliability: float = Field(default=0.5, ge=0.0, le=1.0)
     stealth: float = Field(default=0.5, ge=0.0, le=1.0)
     remediation: str = ""
+    impact: str = Field(
+        default="",
+        description=(
+            "One-line consequence statement — what an attacker achieves if the "
+            "technique succeeds (end-state / blast radius). Curated in the "
+            "_IMPACT side-car in technique_db.py; when empty, SARIF/UI consumers "
+            "derive a severity+category fallback so the field is never blank."
+        ),
+    )
     cli_flag: str | None = Field(
         default=None,
         description=(

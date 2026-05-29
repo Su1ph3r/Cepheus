@@ -601,3 +601,57 @@ def test_load_admission_config_with_baseline(tmp_path):
     )
     assert cfg.baseline_identities is not None
     assert len(cfg.baseline_identities) >= 1
+
+
+def test_admission_server_rejects_missing_client_ca(tmp_path):
+    """The --client-ca flag plumbs through and a missing CA file is
+    rejected before the server starts (so mTLS can't silently no-op)."""
+    from typer.testing import CliRunner
+
+    from cepheus.cli import app
+
+    cert = tmp_path / "tls.crt"
+    cert.write_text("placeholder", encoding="utf-8")
+    key = tmp_path / "tls.key"
+    key.write_text("placeholder", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "admission-server",
+            "--cert-file",
+            str(cert),
+            "--key-file",
+            str(key),
+            "--client-ca",
+            str(tmp_path / "missing-ca.pem"),
+            "--max-severity",
+            "critical",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "client-ca not found" in result.output
+
+
+def test_health_handler_does_not_serve_validate(monkeypatch):
+    """The plaintext health handler must NOT serve /validate — otherwise
+    mTLS on the TLS port could be bypassed by POSTing to the cleartext
+    health port."""
+    from cepheus.server.admission import AdmissionHandler, HealthHandler
+
+    # do_POST is overridden away from the admission path.
+    assert HealthHandler.do_POST is not AdmissionHandler.do_POST
+
+    handled = {"called": False}
+    monkeypatch.setattr(
+        "cepheus.server.admission._handle_admission",
+        lambda *a, **k: (handled.__setitem__("called", True), (200, {}))[1],
+    )
+    # Build a handler without going through the socket-bound __init__.
+    h = HealthHandler.__new__(HealthHandler)
+    replies: list[int] = []
+    h._reply = lambda status, body, content_type="application/json": replies.append(status)  # type: ignore[method-assign]
+    h.path = "/validate"
+    h.do_POST()
+    assert handled["called"] is False, "/validate must not be handled on the health port"
+    assert replies == [HTTPStatus.NOT_FOUND]

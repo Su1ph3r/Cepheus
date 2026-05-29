@@ -371,3 +371,82 @@ def test_match_technique_no_prerequisites():
     matched, confidence = match_technique(p, t)
     assert matched is True
     assert confidence == 1.0
+
+
+# --- regression guards: malformed-input edges (bug-hunt --full) ---
+
+
+def test_kernel_lte_unknown_kernel_does_not_false_positive():
+    """A malformed/unknown kernel parses to (0,0,0); kernel_lte must NOT
+    treat that as <= every target (which would false-positive every
+    'kernel <= X' CVE gate)."""
+    posture = ContainerPosture(kernel=KernelInfo(version="garbage", major=0, minor=0, patch=0))
+    prereq = Prerequisite(
+        check_field="kernel.version",
+        check_type="kernel_lte",
+        check_value="5.0.0",
+        confidence_if_met=0.9,
+        confidence_if_absent=0.2,
+    )
+    # Unknown kernel → confidence_if_absent, not a spurious confidence_if_met.
+    assert evaluate_prerequisite(posture, prereq) == 0.2
+
+
+def test_gte_rejects_bool_value():
+    """float(True) == 1.0 must not silently satisfy a numeric gte gate."""
+    posture = ContainerPosture()
+    prereq = Prerequisite(
+        check_field="runtime.privileged",  # a bool field
+        check_type="gte",
+        check_value=1,
+        confidence_if_met=0.9,
+        confidence_if_absent=0.1,
+    )
+    posture.runtime.privileged = True
+    assert evaluate_prerequisite(posture, prereq) == 0.1
+
+
+def _runc_cve_technique() -> EscapeTechnique:
+    """A technique whose SOLE prereq is a version_lte on runc_version —
+    the shape of CVE-2025-31133/52565/52881."""
+    return EscapeTechnique(
+        id="t_runc_cve",
+        name="runc version CVE",
+        category=TechniqueCategory.KERNEL,
+        severity=Severity.HIGH,
+        description="runc <= 1.2.7",
+        prerequisites=[
+            Prerequisite(
+                check_field="runtime.runc_version",
+                check_type="version_lte",
+                check_value="1.2.7",
+                confidence_if_absent=0.2,
+            )
+        ],
+    )
+
+
+def test_version_lte_known_vulnerable_runc_matches_on_distro_kernel():
+    """A KNOWN vulnerable runc version must match even on a distro/vendor
+    kernel — version_lte is a component-version check, not a kernel-range
+    check, so the distro-kernel backport downgrade must NOT suppress it."""
+    posture = ContainerPosture(
+        kernel=KernelInfo(version="6.6.114.1-microsoft-standard-WSL2", major=6, minor=6, patch=114),
+        runtime=RuntimeInfo(runc_version="1.2.7"),
+    )
+    posture.kernel.is_distro_kernel = True
+    matched, conf = match_technique(posture, _runc_cve_technique(), min_confidence=0.3)
+    assert matched is True
+    assert conf >= 0.3
+
+
+def test_version_lte_unknown_runc_does_not_false_positive_on_distro_kernel():
+    """Unknown runc version on a distro kernel must NOT match — no false
+    positive (confidence_if_absent stays below the 0.3 threshold)."""
+    posture = ContainerPosture(
+        kernel=KernelInfo(version="6.6.114.1-microsoft-standard-WSL2", major=6, minor=6, patch=114),
+        runtime=RuntimeInfo(runc_version=None),
+    )
+    posture.kernel.is_distro_kernel = True
+    matched, _ = match_technique(posture, _runc_cve_technique(), min_confidence=0.3)
+    assert matched is False

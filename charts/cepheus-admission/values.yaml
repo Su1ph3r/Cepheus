@@ -18,7 +18,7 @@ image:
   # deployment template would crash the container at start with
   # "unknown flag" from Typer. Bump at release-cut time, not in
   # feature branches.
-  tag: "0.6.3"
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
   # imagePullSecrets: [name: my-pull-secret]
   imagePullSecrets: []
@@ -155,6 +155,30 @@ tls:
   existingSecret: ""
 
   selfSigned: false
+
+  # When tls.selfSigned=true, a pre-install/pre-upgrade Job generates a
+  # CA + serving cert into the TLS secret, and a post-install/post-upgrade
+  # Job patches the ValidatingWebhookConfiguration caBundle. Uses the
+  # upstream kube-webhook-certgen tool. Exactly one of certManager.enabled
+  # / existingSecret / selfSigned must be set.
+  #
+  # NOTE: self-signed is for kind/minikube/dev only — NOT production
+  # (manual rotation, no chain). The caBundle is injected by a
+  # post-install hook Job; if that Job fails (check `helm install`
+  # output), the webhook is left untrusted — with the default
+  # failurePolicy=Ignore it is silently bypassed until the patch
+  # succeeds. Production clusters should use cert-manager.
+  selfSignedJob:
+    image: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.4.4
+    pullPolicy: IfNotPresent
+
+# Optional mutual TLS on the webhook /validate port. When clientCASecret
+# is set, the deployment mounts it and passes --client-ca so only the
+# kube-apiserver (presenting a client cert signed by this CA) can reach
+# the webhook. The secret must contain a `ca.crt` key holding the
+# apiserver client-CA bundle. Default empty = server-only TLS.
+mtls:
+  clientCASecret: ""
 
 service:
   type: ClusterIP

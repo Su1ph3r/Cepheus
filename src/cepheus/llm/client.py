@@ -14,6 +14,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Shared prefix for the graceful-degradation sentinels returned when an LLM
+# call fails or returns empty. The analysis/summary still completes (the
+# report is generated either way) but callers can detect the marker via
+# ``is_unavailable_marker`` to surface a visible warning rather than shipping
+# a degraded report silently.
+_UNAVAILABLE_PREFIX = "[LLM "
+
+
+def is_unavailable_marker(text: str | None) -> bool:
+    """True if ``text`` is an LLM-unavailable sentinel (failure or empty
+    response), so the CLI can warn the operator instead of presenting a
+    degraded report as a successful one."""
+    return isinstance(text, str) and text.startswith(_UNAVAILABLE_PREFIX) and "unavailable" in text
+
 
 class LLMClient:
     """Wraps litellm to provide LLM-assisted container security analysis."""
@@ -26,7 +40,7 @@ class LLMClient:
         try:
             import litellm  # noqa: F401
         except ImportError:
-            raise ImportError("LLM features require the 'llm' extra. Install with: pip install cepheus[llm]")
+            raise ImportError("LLM features require the 'llm' extra. Install with: pip install 'cepheus-engine[llm]'")
 
     async def analyze_posture(
         self,
@@ -51,10 +65,14 @@ class LLMClient:
                 api_key=self.config.llm_api_key,
                 base_url=self.config.llm_base_url,
             )
-            return response.choices[0].message.content
+            choices = getattr(response, "choices", None) or []
+            content = choices[0].message.content if choices else None
+            if not content:
+                return f"{_UNAVAILABLE_PREFIX}analysis unavailable: model returned an empty response]"
+            return content
         except Exception as exc:
             logger.error("LLM analysis failed: %s: %s", type(exc).__name__, exc)
-            return f"[LLM analysis unavailable: {type(exc).__name__}: {exc}]"
+            return f"{_UNAVAILABLE_PREFIX}analysis unavailable: {type(exc).__name__}: {exc}]"
 
     def analyze_posture_sync(
         self,
@@ -93,10 +111,14 @@ class LLMClient:
                 api_key=self.config.llm_api_key,
                 base_url=self.config.llm_base_url,
             )
-            return response.choices[0].message.content
+            choices = getattr(response, "choices", None) or []
+            content = choices[0].message.content if choices else None
+            if not content:
+                return f"{_UNAVAILABLE_PREFIX}summary unavailable: model returned an empty response]"
+            return content
         except Exception as exc:
             logger.error("LLM summary failed: %s: %s", type(exc).__name__, exc)
-            return f"[LLM summary unavailable: {type(exc).__name__}: {exc}]"
+            return f"{_UNAVAILABLE_PREFIX}summary unavailable: {type(exc).__name__}: {exc}]"
 
     def summarize_sync(self, result: AnalysisResult) -> str:
         """Synchronous wrapper for summarize."""

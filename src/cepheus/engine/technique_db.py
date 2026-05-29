@@ -85,6 +85,99 @@ _COMPLIANCE_CROSSWALK: dict[str, dict[str, list[str]]] = {
     "lsm_apparmor_unconfined": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
     "lsm_selinux_unconfined": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
     "cap_sys_admin_no_seccomp": {"cis": ["5.7.2"], "nist": ["4.2.1"], "pci": ["2.2.5"]},
+    # Mount / device / cgroup escape families.
+    "cgroupfs_escape": {"cis": ["5.2.1", "5.2.6"], "nist": ["4.2.4", "4.2.5"], "pci": ["2.2.5"]},
+    "systemd_cgroup_injection": {"cis": ["5.2.1", "5.2.6"], "nist": ["4.2.4"], "pci": ["2.2.5"]},
+    "devfs_access": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "device_mapper_access": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "sysfs_hugepages": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "tmpfs_shm_cross_container": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "vm_param_manipulation": {"cis": ["5.2.10"], "nist": ["4.2.2"], "pci": ["2.2.5"]},
+    "proc_fd_symlink_traversal": {"cis": ["5.2.10"], "nist": ["4.2.2", "4.3.5"], "pci": ["2.2.5"]},
+    # Capability / eBPF family.
+    "ebpf_probe_write_user": {"cis": ["5.2.1"], "nist": ["4.2.5"], "pci": ["2.2.5"]},
+}
+
+
+# Per-technique impact — the consequence an attacker achieves if the
+# technique succeeds (end-state / blast radius), in one line. Kept as a
+# side-car keyed by technique id (same rationale as _COMPLIANCE_CROSSWALK)
+# so the technique definitions stay readable. A technique absent from this
+# map keeps impact="" and SARIF/UI consumers fall back to a
+# severity+category-derived statement (see output/sarif.py), so the field
+# is never blank.
+_IMPACT: dict[str, str] = {
+    # ── CAPABILITY ──
+    "cap_sys_admin_mount": "Read/write access to the entire host filesystem, leading to full node compromise.",
+    "cap_sys_admin_cgroup_escape": "Arbitrary command execution as root on the host via the cgroup release_agent.",
+    "cap_sys_admin_bpf": "Arbitrary kernel memory read/write, escalating to root code execution on the host.",
+    "cap_sys_ptrace": "Code injection into host processes, escalating to host-level code execution.",
+    "cap_dac_read_search": "Read access to any file on the host, including credentials, keys, and tokens.",
+    "cap_dac_override": "Write access to any file on the host, enabling persistence and privilege escalation.",
+    "cap_net_admin": "Host network reconfiguration enabling traffic interception and ARP/DNS spoofing.",
+    "cap_sys_rawio": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
+    "ebpf_probe_write_user": "Kernel-assisted writes to process memory, escalating to host code execution.",
+    # ── MOUNT ──
+    "docker_socket_mount": "Full control of the Docker daemon — launch a privileged container to own the host.",
+    "procfs_core_pattern": "Host command execution as root by hijacking the kernel core-dump handler.",
+    "procfs_sysrq": "Crash or reboot the host kernel — host-wide denial of service.",
+    "sysfs_hugepages": "Kernel-parameter tampering via writable sysfs that can destabilize or compromise the host.",
+    "hostpath_mount_etc": "Write host /etc (passwd/shadow/cron) to gain persistent root on the node.",
+    "hostpath_mount_root": "Unrestricted read/write of the host root filesystem — full node compromise.",
+    "cgroupfs_escape": "Host command execution via writable cgroup release_agent abuse.",
+    "devfs_access": "Raw read/write of host disks and devices, bypassing all filesystem controls.",
+    "containerd_sock_mount": "Direct containerd control — create privileged containers and take over the host.",
+    "crio_sock_mount": "Direct CRI-O control — create privileged containers and take over the node.",
+    "systemd_cgroup_injection": "Execute an attacker-defined systemd unit as root on the host.",
+    "tmpfs_shm_cross_container": "Cross-container data exfiltration via shared writable /dev/shm.",
+    "proc_fd_symlink_traversal": "Read/write host files outside the container via /proc/self/fd symlinks.",
+    "device_mapper_access": "Block-device remapping that can expose or corrupt host storage.",
+    "vm_param_manipulation": "Kernel memory-management tampering that can degrade or destabilize the host.",
+    # ── KERNEL (CVE) ──
+    "cve_2022_0185": "Kernel heap overflow → container-to-host privilege escalation (root on the node).",
+    "cve_2022_0847": "DirtyPipe: overwrite read-only host files → root privilege escalation and container escape.",
+    "cve_2021_22555": "Netfilter heap corruption → kernel code execution and root on the host.",
+    "cve_2022_2588": "net/sched use-after-free → privilege escalation from container to host root.",
+    "cve_2023_0386": "OverlayFS setuid copy-up flaw → local root on the host node.",
+    "cve_2023_32233": "nf_tables use-after-free → arbitrary kernel code execution and host root.",
+    "cve_2024_1086": "nf_tables double-free → kernel code execution and container escape to host root.",
+    "cve_2021_31440": "eBPF verifier flaw → out-of-bounds kernel access and privilege escalation.",
+    "cve_2022_23222": "BPF verifier type confusion → arbitrary kernel read/write and escalation.",
+    "cve_2024_21626": "runc fd leak (Leaky Vessels) → host filesystem access and container escape to the node.",
+    "cve_2024_53104": "UVC driver out-of-bounds write → local privilege escalation on the host.",
+    "cve_2025_21756": "vsock use-after-free → kernel code execution and host compromise.",
+    "cve_2025_31133": "runc masked-path race → host file access during container start.",
+    "cve_2025_52565": "runc /dev/console race → host file write via symlink redirection.",
+    "cve_2025_52881": "runc /proc write redirection → host file tampering during container setup.",
+    "cve_2024_23651": "BuildKit cache-mount TOCTOU → host access at image-build time.",
+    "cve_2024_23652": "BuildKit path traversal → arbitrary host file deletion at build time.",
+    # ── RUNTIME ──
+    "k8s_service_account": "Service-account token abuse against the Kubernetes API enabling lateral movement.",
+    "k8s_kubelet_api": "Command execution in any pod on the node via the unauthenticated kubelet API.",
+    "k8s_etcd_access": "Direct etcd access exposes all cluster secrets and enables full cluster takeover.",
+    "docker_api_unauth": "Unauthenticated Docker API → full control of every container and the host.",
+    "containerd_shim_escape": "containerd-shim exploitation → host access via the container runtime.",
+    "runc_cve_2019_5736": "Overwrite the host runc binary via /proc/self/exe → code execution on the host.",
+    "cloud_metadata_ssrf": "Reachable cloud metadata endpoint → theft of instance IAM credentials.",
+    "lsm_apparmor_unconfined": "No AppArmor confinement — removes the MAC layer that blunts escape attempts.",
+    "lsm_selinux_unconfined": "SELinux disabled/unconfined — removes the MAC layer that contains escapes.",
+    "k8s_node_proxy": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
+    "cve_2025_23266": "NVIDIA Container Toolkit OCI-hook LD_PRELOAD abuse → container escape to the host.",
+    "cve_2024_0132": "Malicious image abuses the NVIDIA Container Toolkit → host access.",
+    "cve_2025_1974": "Unauthenticated RCE in the ingress-nginx admission webhook → cluster compromise.",
+    "cve_2025_9074": "Docker Desktop container escape → access to the host from within a container.",
+    # ── COMBINATORIAL ──
+    "cap_sys_admin_no_seccomp": "Unfiltered CAP_SYS_ADMIN enables mount/cgroup/BPF escapes → root on the host.",
+    "privileged_docker_sock": "Privileged container plus Docker socket → near-guaranteed, trivial host takeover.",
+    "cap_net_raw_metadata": "ARP spoofing plus metadata access → interception of cloud IAM credentials.",
+    "writable_proc_privileged": "Privileged container with writable /proc/sys/kernel → core_pattern host code execution.",
+    "user_ns_kernel_exploit": "User namespaces plus a vulnerable kernel → unprivileged-to-host privilege escalation.",
+    "cap_sys_admin_apparmor_unconfined": "CAP_SYS_ADMIN without AppArmor confinement → unrestricted host escape.",
+    # ── INFO DISCLOSURE ──
+    "env_secret_leak": "Exposed credentials in environment variables enabling lateral movement.",
+    "cloud_metadata_creds": "Leaked cloud IAM credentials and identity tokens enabling cloud-account compromise.",
+    "k8s_configmap_secrets": "Readable Kubernetes secrets and configmaps enabling lateral movement.",
+    "docker_env_inspection": "Inspection of other containers' environment variables, leaking their secrets.",
 }
 
 
@@ -106,10 +199,27 @@ def _apply_compliance(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
     return techs
 
 
+def _apply_impact(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
+    """Merge ``_IMPACT`` into the techniques in place.
+
+    Same side-car pattern as ``_apply_compliance`` — keeps the per-technique
+    consequence statements in one auditable place instead of bloating every
+    technique constructor. Techniques absent from the map keep ``impact=""``;
+    SARIF/UI consumers derive a severity+category fallback so the field is
+    never blank.
+    """
+    for t in techs:
+        impact = _IMPACT.get(t.id)
+        if impact:
+            t.impact = impact
+    return techs
+
+
 def _build_techniques() -> list[EscapeTechnique]:
     """Build and return all 65 escape techniques."""
     techs = _raw_techniques()
-    return _apply_compliance(techs)
+    techs = _apply_compliance(techs)
+    return _apply_impact(techs)
 
 
 def _raw_techniques() -> list[EscapeTechnique]:
@@ -1412,9 +1522,14 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 Prerequisite(
                     check_field="runtime.runc_version",
                     check_type="version_lte",
+                    # Unknown runc version must stay BELOW min_confidence (0.3)
+                    # so we don't claim this CVE when the version is unobserved
+                    # — a known-vulnerable version still matches at
+                    # confidence_if_met. (version_lte is no longer kernel-only
+                    # capped, so this is the only suppression for the unknown case.)
                     check_value="1.2.7",
                     description="runc <= 1.2.7 is vulnerable",
-                    confidence_if_absent=0.3,
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1438,9 +1553,14 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 Prerequisite(
                     check_field="runtime.runc_version",
                     check_type="version_lte",
+                    # Unknown runc version must stay BELOW min_confidence (0.3)
+                    # so we don't claim this CVE when the version is unobserved
+                    # — a known-vulnerable version still matches at
+                    # confidence_if_met. (version_lte is no longer kernel-only
+                    # capped, so this is the only suppression for the unknown case.)
                     check_value="1.2.7",
                     description="runc <= 1.2.7 is vulnerable",
-                    confidence_if_absent=0.3,
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1464,9 +1584,14 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 Prerequisite(
                     check_field="runtime.runc_version",
                     check_type="version_lte",
+                    # Unknown runc version must stay BELOW min_confidence (0.3)
+                    # so we don't claim this CVE when the version is unobserved
+                    # — a known-vulnerable version still matches at
+                    # confidence_if_met. (version_lte is no longer kernel-only
+                    # capped, so this is the only suppression for the unknown case.)
                     check_value="1.2.7",
                     description="runc <= 1.2.7 is vulnerable",
-                    confidence_if_absent=0.3,
+                    confidence_if_absent=0.2,
                 ),
             ],
             mitre_attack=["T1611"],

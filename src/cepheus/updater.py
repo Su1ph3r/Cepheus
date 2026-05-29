@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -115,3 +117,52 @@ def is_newer(installed: str, latest_tag: str) -> bool:
     if inst is None or cur is None:
         return False
     return cur > inst
+
+
+def detect_install_method() -> str:
+    """Best-effort detection of how this Cepheus was installed, to pick
+    the right self-upgrade command. Returns one of: ``pipx``, ``brew``,
+    ``scoop``, ``pip``, ``binary``, ``unknown``.
+
+    Detection is path-based (where this module and the interpreter live)
+    plus the frozen-binary marker. It is intentionally conservative —
+    an ``unknown`` result simply means we advise a manual upgrade rather
+    than guessing wrong and running the wrong package manager.
+    """
+    # Nuitka/PyInstaller single-file binary: can't self-replace a running
+    # executable across every OS, so report binary and let the caller
+    # advise a manual download.
+    if getattr(sys, "frozen", False):
+        return "binary"
+
+    mod = (__file__ or "").replace("\\", "/").lower()
+    exe = (sys.executable or "").replace("\\", "/").lower()
+    pipx_home = os.environ.get("PIPX_HOME", "").replace("\\", "/").lower()
+
+    if "/pipx/" in mod or "/pipx/" in exe or (pipx_home and pipx_home in mod):
+        return "pipx"
+    if "/cellar/" in mod or "/homebrew/" in mod or "/cellar/" in exe or "/homebrew/" in exe:
+        return "brew"
+    if "/scoop/" in mod or "/scoop/" in exe:
+        return "scoop"
+    if "/site-packages/" in mod or "/dist-packages/" in mod:
+        return "pip"
+    return "unknown"
+
+
+def upgrade_command(method: str) -> list[str] | None:
+    """Return the argv to upgrade Cepheus for a detected install method,
+    or ``None`` when in-place self-upgrade isn't possible (``binary`` /
+    ``unknown``) and the operator must upgrade manually.
+
+    The PyPI distribution is ``cepheus-engine``; the Homebrew formula and
+    Scoop manifest are ``cepheus`` (the formula is tap-qualified)."""
+    if method == "pipx":
+        return ["pipx", "upgrade", "cepheus-engine"]
+    if method == "pip":
+        return [sys.executable, "-m", "pip", "install", "--upgrade", "cepheus-engine"]
+    if method == "brew":
+        return ["brew", "upgrade", "su1ph3r/tap/cepheus"]
+    if method == "scoop":
+        return ["scoop", "update", "cepheus"]
+    return None
