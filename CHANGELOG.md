@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-29
+
+### Fixed
+
+- **Admission webhook now enforces against a real Kubernetes apiserver.** The
+  handler matched the request path exactly, but the apiserver calls the webhook
+  as `POST /validate?timeout=Ns` — the query string produced a 404, so the
+  webhook silently failed open (admitting every pod), or denied every pod under
+  `failurePolicy: Fail`. It now routes on the URL path component.
+
 ## [1.0.0] - 2026-05-28
 
 First stable release. The `cepheus.engine` and `cepheus.models` public API and
