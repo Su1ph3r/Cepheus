@@ -93,6 +93,23 @@ jobs:
             --set replicaCount=1 \
             --wait --timeout 5m
 
+      - name: Wait for the webhook to be reachable (cert issued + caBundle injected)
+        # helm --wait only blocks on the Deployment becoming Available.
+        # cert-manager issues the serving cert and the cainjector populates
+        # the ValidatingWebhookConfiguration caBundle asynchronously; until
+        # both land, the apiserver can't reach/trust the webhook and the
+        # default failurePolicy=Ignore silently ADMITS the test pod. Gate the
+        # assertions on the full readiness chain.
+        run: |
+          kubectl -n cepheus-system wait --for=condition=Ready certificate --all --timeout=120s
+          for i in $(seq 1 60); do
+            ca=$(kubectl get validatingwebhookconfiguration cepheus-admission \
+                   -o jsonpath='{.webhooks[0].clientConfig.caBundle}' 2>/dev/null || true)
+            if [ -n "$ca" ]; then echo "VWC caBundle injected"; break; fi
+            echo "  waiting for caBundle injection ($i/60)"; sleep 2
+          done
+          kubectl -n cepheus-system rollout status deploy/cepheus-admission --timeout=120s
+
       - name: Show webhook state for debugging
         if: always()
         run: |
