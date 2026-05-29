@@ -38,6 +38,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -509,14 +510,17 @@ class AdmissionHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/healthz":
+        # Match on the path component only — see do_POST for why a query
+        # string can ride along on these requests.
+        route = urlsplit(self.path).path
+        if route == "/healthz":
             # Liveness: is the process responsive? Cache state is not
             # a liveness concern — a broken cache doesn't justify
             # killing the pod (which would lose the last-known kernel
             # snapshot the cache is still serving).
             self._reply(HTTPStatus.OK, b"ok\n", content_type="text/plain")
             return
-        if self.path == "/readyz":
+        if route == "/readyz":
             cfg: AdmissionConfig = self.server.cepheus_config  # type: ignore[attr-defined]
             unhealthy_reason = _cache_unhealthy_reason(cfg)
             if unhealthy_reason is not None:
@@ -533,7 +537,11 @@ class AdmissionHandler(BaseHTTPRequestHandler):
         self._reply(HTTPStatus.NOT_FOUND, b'{"error":"not found"}\n')
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/validate":
+        # The kube-apiserver calls the webhook as `POST /validate?timeout=Ns`,
+        # so compare the path component only. An exact `self.path == "/validate"`
+        # check 404s every real admission call: the webhook then silently fails
+        # open (failurePolicy: Ignore) or denies every pod (failurePolicy: Fail).
+        if urlsplit(self.path).path != "/validate":
             self._reply(HTTPStatus.NOT_FOUND, b'{"error":"not found"}\n')
             return
 

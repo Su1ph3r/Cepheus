@@ -118,9 +118,12 @@ jobs:
           kubectl -n cepheus-system logs -l app.kubernetes.io/name=cepheus-admission --tail=200 || true
 
       - name: Privileged pod must be DENIED
+        # Retry to ride out the apiserver's webhook-config reload window: the
+        # VWC carries the injected caBundle (waited on above) before the
+        # apiserver actually starts enforcing the webhook. Server-side dry-run
+        # exercises the full admission path without creating or leaking a pod.
         run: |
-          set +e
-          out=$(kubectl apply -f - 2>&1 <<'YAML'
+          cat > /tmp/e2e-privileged.yaml <<'YAML'
           apiVersion: v1
           kind: Pod
           metadata:
@@ -134,18 +137,24 @@ jobs:
                 securityContext:
                   privileged: true
           YAML
-          )
-          rc=$?
-          set -e
+          set +e
+          ok=0
+          for i in $(seq 1 20); do
+            out=$(kubectl apply --dry-run=server -f /tmp/e2e-privileged.yaml 2>&1)
+            rc=$?
+            if [ "$rc" -ne 0 ] && echo "$out" | grep -q "Cepheus admission gate"; then
+              echo "Denied by Cepheus on attempt $i."
+              ok=1
+              break
+            fi
+            echo "attempt $i: not denied by Cepheus yet (apiserver may still be loading the webhook); retrying in 3s"
+            sleep 3
+          done
           echo "$out"
-          if [ $rc -eq 0 ]; then
-            echo "::error::Privileged pod was ADMITTED — gate is broken"
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Privileged pod was not denied by Cepheus after retries — gate not enforcing"
             exit 1
           fi
-          echo "$out" | grep -q "Cepheus admission gate" || {
-            echo "::error::Pod was denied but NOT by Cepheus — deny came from somewhere else"
-            exit 1
-          }
 
       - name: Hardened pod must be ADMITTED
         run: |

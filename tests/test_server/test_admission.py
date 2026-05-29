@@ -188,6 +188,45 @@ def test_internal_error_fail_closed_denies(monkeypatch):
     assert "fail-closed" in resp["response"]["status"]["message"]
 
 
+# --- HTTP routing ---------------------------------------------------
+
+
+def test_validate_routes_with_apiserver_query_string():
+    """The kube-apiserver calls the webhook as `POST /validate?timeout=Ns`.
+    The handler must route on the path component, not the raw request-target —
+    an exact ``self.path == "/validate"`` check 404s every real apiserver call,
+    so the webhook silently fails open (or, under failurePolicy: Fail, denies
+    every pod). Exercise the actual handler over plain HTTP (routing is
+    independent of TLS)."""
+    import http.client
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from cepheus.server.admission import AdmissionHandler
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), AdmissionHandler)
+    srv.cepheus_config = AdmissionConfig(max_severity="critical")  # type: ignore[attr-defined]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        port = srv.server_address[1]
+        body = _admission_review("uid-q", _privileged_hostpath_spec())
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request(
+            "POST",
+            "/validate?timeout=10s",
+            body=body,
+            headers={"Content-Type": "application/json", "Content-Length": str(len(body))},
+        )
+        resp = conn.getresponse()
+        data = json.loads(resp.read())
+        conn.close()
+        assert resp.status == HTTPStatus.OK, f"query string broke routing — got HTTP {resp.status}"
+        assert data["response"]["allowed"] is False  # privileged pod must still be denied
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 # --- kernel-CVE filter --------------------------------------------
 
 
