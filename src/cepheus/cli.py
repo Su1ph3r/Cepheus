@@ -296,12 +296,7 @@ def _gate_by_confirmation(result: Any, *, show_potential: bool) -> None:
     result.chains = kept
 
     # Keep remediations consistent with the chains the user will actually see.
-    surviving = {
-        step.technique.id
-        for chain in kept
-        for step in chain.steps
-        if step.technique is not None
-    }
+    surviving = {step.technique.id for chain in kept for step in chain.steps if step.technique is not None}
     result.remediations = [r for r in result.remediations if r.technique_id in surviving]
     result.techniques_in_visible_chains = len(surviving)
 
@@ -489,11 +484,7 @@ def scan(
     report = _confirm_result(result, container_id, runtime)
     _gate_by_confirmation(result, show_potential=show_potential)
 
-    confirmed = sum(
-        1
-        for c in result.chains
-        if c.confirmation is not None and c.confirmation.value == "confirmed"
-    )
+    confirmed = sum(1 for c in result.chains if c.confirmation is not None and c.confirmation.value == "confirmed")
     console.print(
         f"[dim]Live verification: {report.confirmed_count} confirmed, "
         f"{report.not_confirmed_count} refuted, "

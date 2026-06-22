@@ -55,6 +55,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "cap_net_admin",
         "cap_sys_admin_bpf",
         "cap_sys_admin_mount",
+        "cap_sys_module",  # full caps include CAP_SYS_MODULE -> load a kernel module
         "cap_sys_ptrace",  # TP here because hostPID:true
         "cap_sys_rawio",
         "devfs_access",
@@ -78,6 +79,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "cap_net_admin",
         "cap_sys_admin_bpf",
         "cap_sys_admin_mount",
+        "cap_sys_module",  # full caps include CAP_SYS_MODULE -> load a kernel module
         "cap_sys_rawio",
         "devfs_access",
         "ebpf_probe_write_user",
@@ -101,12 +103,14 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "k8s_service_account",
     },
     "T4-build-code": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
         "k8s_service_account",
     },
     "T5a-internal-api": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
@@ -114,6 +118,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
     },
     "T5b-info-app": {
         # Has metadata-db env hint variables — env_secret_leak fires.
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "env_secret_leak",
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
@@ -121,24 +126,28 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "k8s_service_account",
     },
     "T6-poor-registry": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
         "k8s_service_account",
     },
     "T9-metadata-db": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
         "k8s_service_account",
     },
     "T-cache-store": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
         "k8s_service_account",
     },
     "T-goat-home": {
+        "sysfs_uevent_helper",  # /sys/kernel/uevent_helper writable -> hijack uevent helper
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
@@ -147,7 +156,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
 }
 
 # Total expected matches across all 10 pods. Sanity check at aggregate level.
-TOTAL_EXPECTED_MATCHES = sum(len(s) for s in EXPECTED_MATCHES.values())  # 71
+TOTAL_EXPECTED_MATCHES = sum(len(s) for s in EXPECTED_MATCHES.values())  # 80
 
 # Technique IDs that must NEVER match any of these postures. These are the
 # false positives the v0.3.1 precision overhaul eliminated. If any of these

@@ -756,6 +756,7 @@ collect_writable_paths() {
     for _p in \
         /proc/sysrq-trigger \
         /proc/sys/kernel/core_pattern \
+        /proc/sys/kernel/modprobe \
         /sys \
         /sys/fs/cgroup \
         /dev \

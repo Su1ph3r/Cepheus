@@ -117,9 +117,12 @@ _IMPACT: dict[str, str] = {
     "cap_net_admin": "Host network reconfiguration enabling traffic interception and ARP/DNS spoofing.",
     "cap_sys_rawio": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
     "ebpf_probe_write_user": "Kernel-assisted writes to process memory, escalating to host code execution.",
+    "cap_sys_module": "Load an arbitrary kernel module for immediate ring-0 code execution on the host.",
     # ── MOUNT ──
     "docker_socket_mount": "Full control of the Docker daemon — launch a privileged container to own the host.",
     "procfs_core_pattern": "Host command execution as root by hijacking the kernel core-dump handler.",
+    "procfs_modprobe_path": "Host command execution as root by hijacking the kernel modprobe helper.",
+    "sysfs_uevent_helper": "Host command execution as root by hijacking the kernel uevent helper.",
     "procfs_sysrq": "Crash or reboot the host kernel — host-wide denial of service.",
     "sysfs_hugepages": "Kernel-parameter tampering via writable sysfs that can destabilize or compromise the host.",
     "hostpath_mount_etc": "Write host /etc (passwd/shadow/cron) to gain persistent root on the node.",
@@ -584,6 +587,47 @@ def _raw_techniques() -> list[EscapeTechnique]:
             verify_command="for d in /dev/sda /dev/vda /dev/nvme0n1; do [ -r $d ] && dd if=$d of=/dev/null bs=1 count=0 2>/dev/null && exit 0; done; exit 1",
         ),
         EscapeTechnique(
+            id="cap_sys_module",
+            name="Load kernel module via CAP_SYS_MODULE",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.CRITICAL,
+            description=(
+                "CAP_SYS_MODULE permits the init_module/finit_module syscalls, "
+                "letting an attacker load an arbitrary kernel module and execute "
+                "code in ring 0 on the host — an immediate, total container "
+                "escape. The only gates are the capability itself and whether "
+                "module loading has been globally disabled "
+                "(/proc/sys/kernel/modules_disabled)."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_MODULE",
+                    description="Requires CAP_SYS_MODULE capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611", "T1547.006"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.9,
+            stealth=0.2,
+            remediation="--cap-drop=SYS_MODULE",
+            cli_flag="--cap-drop=SYS_MODULE",
+            # CAP_SYS_MODULE is capability bit 16. A passing probe means the
+            # capability is held AND module loading is not globally disabled —
+            # the loadable-module primitive is genuinely available, so this is a
+            # true confirmation (not precondition-only).
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); "
+                '[ -n "$b" ] && [ $((0x$b & (1 << 16))) -ne 0 ] && '
+                '[ "$(cat /proc/sys/kernel/modules_disabled 2>/dev/null || echo 0)" = "0" ]'
+            ),
+        ),
+        EscapeTechnique(
             id="ebpf_probe_write_user",
             name="bpf_probe_write_user kernel manipulation",
             category=TechniqueCategory.CAPABILITY,
@@ -700,6 +744,79 @@ def _raw_techniques() -> list[EscapeTechnique]:
             stealth=0.3,
             remediation="Mount /proc read-only or use seccomp",
             verify_command="exec 3>>/proc/sys/kernel/core_pattern && exec 3>&-",
+        ),
+        EscapeTechnique(
+            id="procfs_modprobe_path",
+            name="Overwrite /proc/sys/kernel/modprobe",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "If /proc/sys/kernel/modprobe is writable AND the container has "
+                "CAP_SYS_ADMIN, an attacker can repoint the kernel's modprobe "
+                "helper at an attacker-controlled script, then trigger an "
+                "auto-modprobe (e.g. executing a file with an unknown binfmt or "
+                "opening a socket for an unregistered protocol) to run that "
+                "script as root on the host. Like core_pattern, the kernel "
+                "rejects writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even "
+                "when the procfs mount looks writable."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/proc/sys/kernel/modprobe",
+                    description="/proc/sys/kernel/modprobe must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required for the kernel to honor writes "
+                        "to /proc/sys/kernel/* — DAC-only access yields EROFS"
+                    ),
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611", "T1547.006"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.8,
+            stealth=0.35,
+            remediation="Mount /proc read-only or drop CAP_SYS_ADMIN",
+            verify_command="exec 3>>/proc/sys/kernel/modprobe && exec 3>&-",
+        ),
+        EscapeTechnique(
+            id="sysfs_uevent_helper",
+            name="Overwrite /sys/kernel/uevent_helper",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "If /sys/kernel/uevent_helper is writable (a host /sys mounted "
+                "read-write, typical of privileged containers), an attacker can "
+                "set it to an attacker-controlled path and then trigger a uevent "
+                "(e.g. `echo change > /sys/.../uevent`). The kernel runs the "
+                "helper as root in the host's initial namespace — a full escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/sys/kernel/uevent_helper",
+                    description="/sys/kernel/uevent_helper must be writable",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.85,
+            stealth=0.3,
+            remediation="Mount /sys read-only",
+            verify_command="exec 3>>/sys/kernel/uevent_helper && exec 3>&-",
         ),
         EscapeTechnique(
             id="procfs_sysrq",

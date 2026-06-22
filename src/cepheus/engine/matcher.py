@@ -32,11 +32,8 @@ def _is_ubiquitous_default_prereq(p: Prerequisite) -> bool:
     technique from the kernel-range confidence cap. Without this,
     `user_ns_kernel_exploit` (kernel_lte + namespaces.user==True) escaped the cap
     and fired HIGH on routine hosts in the vulnerable kernel range."""
-    return (
-        p.check_field.startswith("namespaces.")
-        and p.check_type == "equals"
-        and p.check_value is True
-    )
+    return p.check_field.startswith("namespaces.") and p.check_type == "equals" and p.check_value is True
+
 
 # Substrings/regexes that identify a distro/vendor kernel that actively backports
 # upstream security patches. When detected, kernel-range-only CVE matches are
@@ -292,11 +289,8 @@ def match_technique(
     # prerequisite is either a kernel-version check or a ubiquitous default
     # (e.g. namespaces.user==True) that doesn't confirm a specific vulnerable
     # component — and at least one is an actual kernel-version check.
-    only_kernel_prereqs = any(
-        p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites
-    ) and all(
-        p.check_type in _KERNEL_ONLY_CHECK_TYPES or _is_ubiquitous_default_prereq(p)
-        for p in technique.prerequisites
+    only_kernel_prereqs = any(p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites) and all(
+        p.check_type in _KERNEL_ONLY_CHECK_TYPES or _is_ubiquitous_default_prereq(p) for p in technique.prerequisites
     )
     if only_kernel_prereqs:
         if config is None:

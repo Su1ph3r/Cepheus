@@ -245,11 +245,7 @@ def _chain_to_result(chain: Any, posture_uri: str, posture_hostname: str | None)
             # Code Scanning consumers distinguish a CONFIRMED escape (the
             # verifier demonstrated the primitive) from an unproven static
             # match. Absent when analysis was static-only.
-            **(
-                {"confirmation": chain.confirmation.value}
-                if getattr(chain, "confirmation", None) is not None
-                else {}
-            ),
+            **({"confirmation": chain.confirmation.value} if getattr(chain, "confirmation", None) is not None else {}),
         },
         "partialFingerprints": {
             # Stable fingerprint so re-runs against the same posture

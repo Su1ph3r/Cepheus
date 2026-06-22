@@ -68,8 +68,7 @@ def print_analysis_result(result: AnalysisResult) -> None:
     # also print a banner so the reader treats them as hypotheses, not findings.
     has_confirmation = any(getattr(c, "confirmation", None) is not None for c in result.chains)
     all_unconfirmed = bool(result.chains) and all(
-        getattr(c, "confirmation", None) is not None
-        and c.confirmation.value in ("potential", "unverifiable")
+        getattr(c, "confirmation", None) is not None and c.confirmation.value in ("potential", "unverifiable")
         for c in result.chains
     )
 
