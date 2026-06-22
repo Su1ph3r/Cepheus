@@ -24,6 +24,20 @@ from cepheus.models.technique import EscapeTechnique, Prerequisite
 # prerequisite's own confidence_if_absent instead.
 _KERNEL_ONLY_CHECK_TYPES = {"kernel_gte", "kernel_lte", "kernel_between"}
 
+
+def _is_ubiquitous_default_prereq(p: Prerequisite) -> bool:
+    """A prerequisite that is true on essentially every container and therefore
+    does NOT confirm a specific vulnerable component — e.g. "user namespaces are
+    enabled". Such a prereq must not exempt an otherwise kernel-version-only
+    technique from the kernel-range confidence cap. Without this,
+    `user_ns_kernel_exploit` (kernel_lte + namespaces.user==True) escaped the cap
+    and fired HIGH on routine hosts in the vulnerable kernel range."""
+    return (
+        p.check_field.startswith("namespaces.")
+        and p.check_type == "equals"
+        and p.check_value is True
+    )
+
 # Substrings/regexes that identify a distro/vendor kernel that actively backports
 # upstream security patches. When detected, kernel-range-only CVE matches are
 # downgraded further (config.distro_kernel_max_confidence). The match list
@@ -51,6 +65,16 @@ _DISTRO_KERNEL_PATTERNS: list[tuple[str, str]] = [
     ("orbstack", "orbstack"),
     ("-bottlerocket", "bottlerocket"),
     ("-flatcar", "flatcar"),
+    # Ubuntu/Debian/Proxmox stock kernels are backport-maintained: the distro
+    # patches CVEs in place without bumping the upstream version number, so a
+    # "kernel <= X" range match on these is a weak signal. Recognising them caps
+    # kernel-range-only CVE matches (DirtyPipe et al.) so a routine Ubuntu host
+    # doesn't light up with criticals it's already patched against.
+    ("-generic", "ubuntu-generic"),
+    ("-lowlatency", "ubuntu-lowlatency"),
+    ("-cloud-amd64", "debian-cloud"),
+    ("-cloud-arm64", "debian-cloud"),
+    ("-pve", "proxmox"),
 ]
 
 
@@ -264,13 +288,27 @@ def match_technique(
 
     avg_confidence = sum(confidences) / len(confidences)
 
-    # Kernel-only confidence cap
-    only_kernel_prereqs = all(p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites)
+    # Kernel-only confidence cap. A technique is "kernel-only" if every
+    # prerequisite is either a kernel-version check or a ubiquitous default
+    # (e.g. namespaces.user==True) that doesn't confirm a specific vulnerable
+    # component — and at least one is an actual kernel-version check.
+    only_kernel_prereqs = any(
+        p.check_type in _KERNEL_ONLY_CHECK_TYPES for p in technique.prerequisites
+    ) and all(
+        p.check_type in _KERNEL_ONLY_CHECK_TYPES or _is_ubiquitous_default_prereq(p)
+        for p in technique.prerequisites
+    )
     if only_kernel_prereqs:
         if config is None:
             config = CepheusConfig()
         cap = config.kernel_only_max_confidence
-        if getattr(posture.kernel, "is_distro_kernel", False):
+        # A distro/backport kernel OR an UNKNOWN kernel (version not captured —
+        # e.g. a PodSpec-derived posture from the admission webhook, where the
+        # kernel is unknowable) both make a kernel-range match unverifiable.
+        # Cap to distro_kernel_max_confidence (default 0.2, below min) so the
+        # technique drops instead of firing CRITICAL at the bare threshold.
+        kernel_unknown = _kernel_tuple(posture) == (0, 0, 0)
+        if getattr(posture.kernel, "is_distro_kernel", False) or kernel_unknown:
             cap = min(cap, config.distro_kernel_max_confidence)
         avg_confidence = min(avg_confidence, cap)
 

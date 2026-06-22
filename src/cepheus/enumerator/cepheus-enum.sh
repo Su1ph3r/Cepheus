@@ -374,12 +374,20 @@ collect_security() {
         esac
     fi
 
-    # AppArmor
+    # AppArmor. Distinguish three states for the matcher:
+    #   "unconfined"  -> AppArmor IS active on the host but this container opted
+    #                    out (a real finding).
+    #   "<profile>"   -> confined (no finding).
+    #   ""  (-> null) -> UNKNOWN: the attr file is absent (host has no AppArmor
+    #                    LSM, e.g. Docker Desktop/WSL2) or unreadable. Reporting
+    #                    "unconfined" here was a false positive on every such
+    #                    host, so we leave it null and the technique does not fire.
     APPARMOR=""
     if [ -f /proc/self/attr/current ]; then
         _aa=$(cat /proc/self/attr/current 2>/dev/null | tr -d '\000')
         case "$_aa" in
-            ""| "unconfined") APPARMOR="" ;;
+            "") APPARMOR="" ;;
+            "unconfined") APPARMOR="unconfined" ;;
             *) APPARMOR="$_aa" ;;
         esac
     fi
@@ -562,6 +570,14 @@ collect_credentials() {
     _secrets_file=$(mktemp /tmp/_cepheus_secrets_XXXXXX 2>/dev/null || echo "/tmp/_cepheus_secrets$$")
     env | while IFS='=' read -r _name _val; do
         case "$_name" in
+            # Benign PUBLIC key material — package-signing keys, key IDs,
+            # keyrings, public keys, known_hosts. These match *KEY* but are not
+            # secrets; flagging them (GPG_KEYS, *_PGP_KEY_ID, etc.) was a false
+            # positive. Skipped before the secret match below. Note real private
+            # material (PRIVATE_KEY, SECRET_KEY, API_KEY, ACCESS_KEY) does NOT
+            # match these globs and still gets flagged.
+            *GPG*|*PGP*|*PUBLIC*|*KEYRING*|*KEYSERVER*|*KEY_ID|*KEY_FINGERPRINT|*KNOWN_HOSTS*)
+                : ;;
             *PASSWORD*|*SECRET*|*TOKEN*|*KEY*|*CREDENTIAL*)
                 # Print name for collection below
                 echo "$_name"
