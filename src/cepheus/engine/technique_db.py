@@ -215,11 +215,76 @@ def _apply_impact(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
     return techs
 
 
+# Techniques whose ``verify_command`` only proves a PRECONDITION, not the
+# exploitable primitive itself. A passing probe here means "the necessary
+# condition is present" — NOT "this concrete host is exploitable". The
+# confirmation layer downgrades a pass on these from CONFIRMED to POTENTIAL so
+# a patched-but-precondition-present host (e.g. a GPU node running a FIXED
+# NVIDIA toolkit, or an unpatched-range kernel that's actually backported) is
+# never reported as a confirmed escape. A FAIL still refutes — an absent
+# precondition means the CVE cannot be exploited here at all.
+#
+# Rationale per entry:
+#   - unshare-based kernel CVEs: `unshare -Ur...` proves user-namespace
+#     creation is permitted (the delivery vector) but a PATCHED kernel still
+#     permits unshare — so a pass does not prove the bug is present.
+#   - DirtyPipe: the verifier is a uname version-range check — opportunistic,
+#     identical to the kernel-range static signal, not a primitive proof.
+#   - cap-bit CVEs (BPF): a CapEff probe proves the capability is held, not
+#     that the kernel's BPF verifier is the vulnerable version.
+#   - BuildKit/Docker-Desktop: socket / runtime-marker presence is the
+#     precondition (reachable build daemon / Docker Desktop), not the race/
+#     version bug.
+#   - NVIDIA toolkit CVEs: GPU device presence is the precondition; it says
+#     nothing about the toolkit version.
+#   - IngressNightmare: DNS resolution proves the admission controller is
+#     deployed and reachable, not that it is a vulnerable version.
+# Deliberately ABSENT (these verifiers DO prove the primitive, stay CONFIRMED):
+#   - cve_2024_21626 (runc leaked fd): readlink finds a live leaked host fd —
+#     that IS the exploitable primitive, not merely a precondition.
+#   - all misconfig probes (privileged, cap SYS_ADMIN mount, writable
+#     docker.sock, hostPath): they exercise the actual operation.
+_PRECONDITION_ONLY_VERIFIERS: set[str] = {
+    "cve_2022_0185",
+    "cve_2021_22555",
+    "cve_2022_2588",
+    "cve_2023_0386",
+    "cve_2023_32233",
+    "cve_2024_1086",
+    "cve_2022_0847",
+    "cve_2022_23222",
+    "cve_2024_23651",
+    "cve_2024_23652",
+    "cve_2025_23266",
+    "cve_2024_0132",
+    "cve_2025_1974",
+    "cve_2025_9074",
+}
+
+
+def _apply_verify_semantics(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
+    """Mark precondition-only verifiers (see ``_PRECONDITION_ONLY_VERIFIERS``).
+
+    Side-car pattern so the classification lives in one auditable place rather
+    than a flag scattered across CVE constructors. A defensive guard rejects
+    an entry that names a technique with no verifier at all — that's almost
+    certainly a typo'd id, and silently ignoring it would let a CVE keep
+    over-confirming.
+    """
+    by_id = {t.id: t for t in techs}
+    for tid in _PRECONDITION_ONLY_VERIFIERS:
+        t = by_id.get(tid)
+        if t is not None and t.verify_command:
+            t.verify_confirms_primitive = False
+    return techs
+
+
 def _build_techniques() -> list[EscapeTechnique]:
     """Build and return all 65 escape techniques."""
     techs = _raw_techniques()
     techs = _apply_compliance(techs)
-    return _apply_impact(techs)
+    techs = _apply_impact(techs)
+    return _apply_verify_semantics(techs)
 
 
 def _raw_techniques() -> list[EscapeTechnique]:
@@ -578,13 +643,13 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_value=True,
                     description="Docker socket must be reachable",
                 ),
-                Prerequisite(
-                    check_field="available_tools",
-                    check_type="contains",
-                    check_value="curl",
-                    confidence_if_absent=0.5,
-                    description="curl or similar HTTP client available",
-                ),
+                # NOTE: the old `available_tools contains curl` prerequisite is
+                # removed. `contains` returns 0.0 (a HARD FAIL) when curl is
+                # absent, so the technique NEVER fired on the many images without
+                # curl (alpine, busybox, distroless) — even though a mounted,
+                # writable docker.sock is a full escape regardless of which HTTP
+                # client is installed. The reachable+writable socket IS the
+                # primitive; the tool-free verify_command below confirms it.
             ],
             mitre_attack=["T1611"],
             references=[
@@ -1423,8 +1488,16 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_field="runtime.runc_version",
                     check_type="version_lte",
                     check_value="1.1.11",
-                    confidence_if_absent=0.5,
-                    description="runc <= 1.1.11 is vulnerable",
+                    confidence_if_absent=0.0,
+                    description=(
+                        "runc <= 1.1.11 is vulnerable. The runc version is NOT "
+                        "observable from inside a container, so "
+                        "confidence_if_absent=0.0: this CVE does not fire from "
+                        "in-container enumeration unless a posture supplies a "
+                        "known-vulnerable runc_version. Firing critical on every "
+                        "docker container with kernel<=6.7 (regardless of the "
+                        "actual runc version) was a false positive."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1957,8 +2030,14 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 Prerequisite(
                     check_field="security.apparmor",
                     check_type="equals",
-                    check_value=None,
-                    description="AppArmor must be unconfined (None)",
+                    check_value="unconfined",
+                    description=(
+                        "AppArmor must be KNOWN-unconfined. A null/unknown value "
+                        "(enumerator could not read the profile, or the PodSpec "
+                        "importer cannot determine it) is NOT treated as "
+                        "unconfined — that produced a false positive on every "
+                        "static/unknown posture."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],
@@ -2191,6 +2270,21 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value="docker",
                     description="Requires Docker runtime",
+                ),
+                Prerequisite(
+                    check_field="runtime.runtime_version",
+                    check_type="version_lte",
+                    check_value="4.44.2",
+                    confidence_if_absent=0.0,
+                    description=(
+                        "Docker Desktop <= 4.44.2 is vulnerable (fixed in 4.44.3). "
+                        "The host Docker Desktop version is NOT observable from "
+                        "inside a container, so confidence_if_absent=0.0: this CVE "
+                        "does NOT fire from default in-container enumeration "
+                        "(claiming it on every Docker container regardless of "
+                        "version was a false positive). It fires only when a "
+                        "posture supplies a known-vulnerable runtime_version."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],

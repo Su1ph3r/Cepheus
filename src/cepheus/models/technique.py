@@ -24,6 +24,37 @@ class Severity(str, Enum):
     LOW = "low"
 
 
+class ConfirmationStatus(str, Enum):
+    """How strongly a matched chain has been *confirmed* to be exploitable in
+    the concrete container, as opposed to merely matched against static posture.
+
+    The whole point of Cepheus' precision story: a static prerequisite match is
+    a hypothesis, not a finding. Live verification (``cepheus verify`` /
+    ``cepheus scan``) promotes or demotes each hypothesis. Renderers and the
+    confirmed-only default filter key off this field.
+
+      CONFIRMED     — a live verifier ran and the kernel/runtime permitted the
+                      primitive. This is a real, demonstrated finding.
+      REFUTED       — a live verifier ran and the primitive was rejected. The
+                      static match was a false positive; dropped by default.
+      POTENTIAL     — the technique HAS a verifier but it was not run (offline
+                      posture analysis, no live container). Unconfirmed: shown
+                      only with --show-potential.
+      UNVERIFIABLE  — no automated verifier exists (e.g. a kernel CVE whose only
+                      confirmation is actual exploitation). Cannot be confirmed
+                      in-container; always surfaced separately, never as a
+                      confirmed finding.
+      ERROR         — the verifier infrastructure failed (timeout, runtime
+                      missing). The hypothesis was never actually tested.
+    """
+
+    CONFIRMED = "confirmed"
+    REFUTED = "refuted"
+    POTENTIAL = "potential"
+    UNVERIFIABLE = "unverifiable"
+    ERROR = "error"
+
+
 SEVERITY_ORDER = {
     Severity.CRITICAL: 4,
     Severity.HIGH: 3,
@@ -85,6 +116,23 @@ class EscapeTechnique(BaseModel):
             "= technique not exploitable in this concrete container. None "
             "means no automated verifier exists (e.g. kernel CVEs where "
             "the only confirmation is actual exploitation)."
+        ),
+    )
+    verify_confirms_primitive: bool = Field(
+        default=True,
+        description=(
+            "Whether a PASSING verify_command proves the exploitable primitive "
+            "itself (True) or merely a PRECONDITION for it (False). True for "
+            "misconfig probes that exercise the actual operation (can I mount? "
+            "is the socket writable?). False for CVE probes that only establish "
+            "a necessary condition without proving the version-specific bug — "
+            "e.g. `unshare` proving user namespaces work (but not that the "
+            "kernel is unpatched), or an NVIDIA device existing (but not that "
+            "the toolkit is a vulnerable version). For precondition-only "
+            "verifiers the confirmation layer treats a pass as POTENTIAL (not "
+            "CONFIRMED) so a patched host is never reported as a confirmed "
+            "escape; a FAIL still REFUTES, since an absent precondition means "
+            "the CVE genuinely cannot be exploited here."
         ),
     )
     # Compliance crosswalk: identifiers in popular control frameworks.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from cepheus.models.technique import EscapeTechnique, Severity
+from cepheus.models.technique import ConfirmationStatus, EscapeTechnique, Severity
 
 
 class ChainStep(BaseModel):
@@ -28,3 +28,14 @@ class EscapeChain(BaseModel):
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
     severity: Severity = Severity.LOW
     description: str = ""
+    confirmation: ConfirmationStatus | None = Field(
+        default=None,
+        description=(
+            "Live-verification verdict for this chain. None until "
+            "`apply_confirmation` runs (pure static analysis). Once set, "
+            "renderers and the confirmed-only default filter key off it. "
+            "A chain's status aggregates its steps: any REFUTED step refutes "
+            "the chain (a required step doesn't work); otherwise the chain is "
+            "CONFIRMED only when every verifiable step confirmed."
+        ),
+    )
