@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-23
+
+### Fixed
+
+- **Native Linux/macOS binaries no longer crash under a non-UTF-8 locale.**
+  The CLI forced UTF-8 stdout only on Windows, but the Nuitka-frozen binaries
+  do not get CPython's C-locale-to-UTF-8 coercion (PEP 538). Under a `C` /
+  `POSIX` or empty locale — common in minimal containers and CI runners — the
+  first non-ASCII character (an em dash in a technique description, the
+  confirmation banner, or a box-drawing rune) raised `UnicodeEncodeError` and
+  aborted commands like `techniques`, `analyze`, and `scan`. The stdout/stderr
+  UTF-8 reconfiguration now runs on every platform. The pip and Docker install
+  paths were unaffected (PEP 538 protects them); this only impacted the
+  single-binary install path.
+
 ## [1.1.0] - 2026-06-23
 
 Precision-first release. A static prerequisite match is now treated as a

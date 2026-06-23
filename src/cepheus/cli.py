@@ -18,23 +18,33 @@ from rich.markup import escape as rich_escape
 from cepheus import __version__
 from cepheus.config import CepheusConfig
 
-# Force UTF-8 stdout/stderr on Windows. Python defaults to the active code
-# page (typically cp1252) when stdout is not a TTY — so `cepheus techniques
-# | grep foo` or any redirected output crashes with `OSError: [Errno 22]`
-# the moment Rich tries to emit a non-ASCII char (the … truncation marker
-# or any box-drawing rune). `reconfigure` is a no-op when the underlying
-# stream doesn't support it; the `errors="replace"` fallback keeps output
-# flowing even if a truly un-encodable char slips through.
-if sys.platform == "win32":
-    for _stream in (sys.stdout, sys.stderr):
-        if hasattr(_stream, "reconfigure"):
-            try:
-                _stream.reconfigure(encoding="utf-8", errors="replace")
-            except (AttributeError, OSError, ValueError):
-                # Stream is closed / detached / not a TextIOWrapper — silently
-                # leave the original encoding in place; behaviour matches
-                # pre-fix when redirection isn't in use.
-                pass
+# Force UTF-8 stdout/stderr on every platform. Cepheus emits non-ASCII
+# routinely — box-drawing runes, the … truncation marker, and em dashes in
+# technique descriptions and the confirmation banner — so any stream whose
+# encoding is not UTF-8 crashes with UnicodeEncodeError / OSError the moment
+# Rich renders a table.
+#
+# This bites two ways:
+#   * Windows: stdout defaults to the active code page (typically cp1252)
+#     when not a TTY, so `cepheus techniques | grep foo` crashes.
+#   * Linux/macOS native binaries: the Nuitka-frozen build does NOT get
+#     CPython's C-locale-to-UTF-8 coercion (PEP 538), so under a `C`/`POSIX`
+#     or empty locale (common in minimal containers and CI runners) stdout is
+#     ASCII and the first em dash crashes the command. The pip / Docker
+#     install paths are protected by PEP 538, but the advertised single-binary
+#     path was not — hence reconfiguring unconditionally here.
+# `reconfigure` is a no-op when the stream is already UTF-8; the
+# `errors="replace"` fallback keeps output flowing even if a truly
+# un-encodable char slips through on an exotic stream.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            # Stream is closed / detached / not a TextIOWrapper — silently
+            # leave the original encoding in place; behaviour matches
+            # pre-fix when redirection isn't in use.
+            pass
 
 
 def _version_callback(value: bool) -> None:
