@@ -1,10 +1,10 @@
 {
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Container Escape Scenario Modeler \u2014 enumerate posture, verify primitives.",
   "homepage": "https://github.com/Su1ph3r/Cepheus",
   "license": "MIT",
-  "url": "https://github.com/Su1ph3r/Cepheus/releases/download/v1.0.1/cepheus-windows-amd64.exe",
-  "hash": "483970f2e5e505e0b112d00b2001219b9859a8c7a6432bc1ad6ce84c183e4b16",
+  "url": "https://github.com/Su1ph3r/Cepheus/releases/download/v1.1.0/cepheus-windows-amd64.exe",
+  "hash": "eec772f8f23afc509997cbfb1fed761ae4196254a35cfa8ca6d8e782efb19aed",
   "bin": [
     [
       "cepheus-windows-amd64.exe",
