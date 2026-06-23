@@ -15,6 +15,8 @@ documented return types are stable across 1.x minor/patch releases:
 from cepheus.engine import (
     analyze,                     # (ContainerPosture, CepheusConfig|None) -> AnalysisResult
     verify_analysis,             # run non-destructive verifier probes
+    apply_confirmation,          # (AnalysisResult, VerificationReport) -> None; stamp chains from a live run
+    mark_unconfirmed,            # (AnalysisResult) -> None; label chains for the offline (no-container) case
     load_baseline,               # (path) -> set[ChainIdentity]
     baseline_diff,               # (chains, baseline) -> BaselineDiff
     diff_postures,               # (before, after, config|None) -> DiffResult
@@ -27,8 +29,16 @@ from cepheus.models import (
     EscapeChain, ChainStep,
     AnalysisResult, RemediationItem,
     EscapeTechnique, Prerequisite, Severity, TechniqueCategory,
+    ConfirmationStatus,
 )
 ```
+
+`apply_confirmation` / `mark_unconfirmed` set `EscapeChain.confirmation` to a
+`ConfirmationStatus` (`CONFIRMED`, `REFUTED`, `POTENTIAL`, `UNVERIFIABLE`, or
+`ERROR`). It is `None` until a confirmation pass runs. A technique's
+`verify_confirms_primitive` flag (default `True`) marks whether a passing
+verifier proves the exploitable primitive or only a precondition; a pass on a
+precondition-only verifier is reported as `POTENTIAL`, never `CONFIRMED`.
 
 Each module's `__all__` is the source of truth for the exported surface.
 

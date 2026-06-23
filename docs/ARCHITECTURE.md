@@ -5,7 +5,7 @@
 Cepheus is a two-component container escape modeling tool:
 
 1. **Enumerator** (`cepheus-enum.sh`) — POSIX shell script that runs inside a container and dumps its security posture to JSON
-2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 65 known escape techniques, builds attack chains, scores them, and generates remediation guidance
+2. **Analysis Engine** (`cepheus` CLI) — Python tool that ingests the posture JSON, matches it against 75 known escape techniques, builds attack chains, scores them, optionally confirms them against the live container, and generates remediation guidance
 
 ## Data Flow
 
@@ -56,7 +56,7 @@ Cepheus/
 │   │   ├── chain.py                  # EscapeChain + ChainStep
 │   │   └── result.py                 # AnalysisResult (+ executive_summary) + RemediationItem
 │   ├── engine/
-│   │   ├── technique_db.py           # 65 techniques, declarative prerequisites
+│   │   ├── technique_db.py           # 75 techniques, declarative prerequisites
 │   │   ├── poc_templates.py          # PoC command templates + SafeFormatDict
 │   │   ├── matcher.py                # Prerequisite evaluation engine
 │   │   ├── chainer.py                # Single + combinatorial chain builder

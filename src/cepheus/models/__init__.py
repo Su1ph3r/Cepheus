@@ -3,7 +3,13 @@
 from cepheus.models.chain import ChainStep, EscapeChain
 from cepheus.models.posture import ContainerPosture, KubernetesInfo
 from cepheus.models.result import AnalysisResult, RemediationItem
-from cepheus.models.technique import EscapeTechnique, Prerequisite, Severity, TechniqueCategory
+from cepheus.models.technique import (
+    ConfirmationStatus,
+    EscapeTechnique,
+    Prerequisite,
+    Severity,
+    TechniqueCategory,
+)
 
 __all__ = [
     "ChainStep",
@@ -16,4 +22,5 @@ __all__ = [
     "Prerequisite",
     "Severity",
     "TechniqueCategory",
+    "ConfirmationStatus",
 ]

@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-23
+
+Precision-first release. A static prerequisite match is now treated as a
+hypothesis that live verification promotes or demotes, and the technique
+database grew from 65 to 75 escapes — broader detection without the
+false-positive noise that broader detection usually brings.
+
+### Added
+
+- **Live confirmation, on by default.** New `cepheus scan --container-id <id>`
+  enumerates, analyzes, and live-confirms a running container in one shot,
+  reporting **only the escapes it can actually demonstrate**. `analyze` gains
+  `--container-id` / `--runtime` / `--show-potential` for the same flow against
+  a captured posture. Exit code is `0` only when at least one escape is
+  CONFIRMED.
+- **Confirmation verdicts on every chain.** Each chain carries a
+  `ConfirmationStatus` — `CONFIRMED` (the verifier demonstrated the primitive),
+  `REFUTED` (rejected — dropped by default), `POTENTIAL` (matched but unproven),
+  `UNVERIFIABLE` (no automated probe, e.g. a kernel CVE), or `ERROR`. The
+  terminal output adds a Confirmation column and an UNCONFIRMED banner for
+  static-only runs; JSON and SARIF carry the verdict. `ConfirmationStatus`,
+  `apply_confirmation`, and `mark_unconfirmed` are part of the public API.
+- **10 new escape techniques (65 → 75):** `CAP_SYS_MODULE` (kernel-module
+  load), `CAP_SYS_BOOT` (host reboot), `CAP_SYSLOG` and `CAP_PERFMON` (kernel
+  address disclosure / KASLR bypass), writable `/proc/sys/kernel/modprobe` and
+  `/sys/kernel/uevent_helper`, a mounted Podman socket, a shared host PID
+  namespace, and the CVE-2024-0133 (NVIDIA Container Toolkit) and CVE-2024-23653
+  (BuildKit) Leaky Vessels companions. The enumerator now probes the modprobe
+  and Podman-socket paths.
+
+### Changed
+
+- **Precondition-only verifiers no longer over-confirm.** Many CVE probes only
+  prove a precondition (a GPU device exists, a build socket is reachable, user
+  namespaces work) rather than the version-specific bug. A pass on those is now
+  reported as POTENTIAL instead of CONFIRMED, so a fully patched host is never
+  flagged as a confirmed escape; a failing probe still refutes.
+
+### Fixed
+
+- **Calibration pass against field false positives.** Kernel-range-only matches
+  are capped on backport-maintained (Ubuntu/Debian/Proxmox) or unknown kernels;
+  ubiquitous-default prerequisites (user namespaces enabled) no longer exempt a
+  technique from the kernel-range cap; AppArmor is treated as unconfined only
+  when known-unconfined (a null/unknown value is not); runc and Docker Desktop
+  CVEs hard-gate on their unobservable component versions; and benign public key
+  material (GPG/PGP keyrings) is no longer flagged as a secret.
+
 ## [1.0.1] - 2026-05-29
 
 ### Fixed
