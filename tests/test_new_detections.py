@@ -19,6 +19,7 @@ from cepheus.models.posture import (
     CapabilityInfo,
     ContainerPosture,
     KernelInfo,
+    NamespaceInfo,
     RuntimeInfo,
     SecurityProfile,
 )
@@ -148,3 +149,35 @@ def test_cve_companions_present_and_precondition_only():
         # Both confirm only a precondition (GPU device / build socket), never
         # the version-specific bug, so a passing probe must stay POTENTIAL.
         assert t.verify_confirms_primitive is False, tid
+
+
+# --- CAP_PERFMON ------------------------------------------------------------
+def test_cap_perfmon_fires_when_held():
+    assert "cap_perfmon" in _ids(_base(capabilities=CapabilityInfo(effective=["CAP_PERFMON"])))
+
+
+def test_cap_perfmon_silent_without_cap():
+    assert "cap_perfmon" not in _ids(_base(capabilities=CapabilityInfo(effective=["CAP_KILL"])))
+
+
+# --- host PID namespace -----------------------------------------------------
+def test_host_pid_namespace_fires_when_shared():
+    """namespaces.pid == False means the PID namespace is shared with the host
+    (hostPID:true) — every host process is visible."""
+    posture = _base(namespaces=NamespaceInfo(pid=False))
+    assert "host_pid_namespace" in _ids(posture)
+
+
+def test_host_pid_namespace_silent_with_private_ns():
+    posture = _base(namespaces=NamespaceInfo(pid=True))
+    assert "host_pid_namespace" not in _ids(posture)
+
+
+# --- podman socket ----------------------------------------------------------
+def test_podman_sock_fires_when_writable():
+    posture = _base(writable_paths=["/run/podman/podman.sock"])
+    assert "podman_sock_mount" in _ids(posture)
+
+
+def test_podman_sock_silent_when_absent():
+    assert "podman_sock_mount" not in _ids(_base())

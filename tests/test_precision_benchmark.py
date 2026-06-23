@@ -53,6 +53,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "cap_dac_override",
         "cap_dac_read_search",
         "cap_net_admin",
+        "cap_perfmon",  # full caps include CAP_PERFMON -> kernel memory disclosure
         "cap_sys_admin_bpf",
         "cap_sys_admin_mount",
         "cap_sys_boot",  # full caps include CAP_SYS_BOOT -> reboot the host
@@ -63,6 +64,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "devfs_access",
         "ebpf_probe_write_user",
         "env_secret_leak",  # K8S_GOAT_VAULT_KEY injected via env
+        "host_pid_namespace",  # hostPID:true -> sees + signals all host processes
         "k8s_configmap_secrets",
         "k8s_kubelet_api",
         "k8s_node_proxy",
@@ -79,6 +81,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
         "cap_dac_override",
         "cap_dac_read_search",
         "cap_net_admin",
+        "cap_perfmon",  # full caps include CAP_PERFMON -> kernel memory disclosure
         "cap_sys_admin_bpf",
         "cap_sys_admin_mount",
         "cap_sys_boot",  # full caps include CAP_SYS_BOOT -> reboot the host
@@ -160,7 +163,7 @@ EXPECTED_MATCHES: dict[str, set[str]] = {
 }
 
 # Total expected matches across all 10 pods. Sanity check at aggregate level.
-TOTAL_EXPECTED_MATCHES = sum(len(s) for s in EXPECTED_MATCHES.values())  # 84
+TOTAL_EXPECTED_MATCHES = sum(len(s) for s in EXPECTED_MATCHES.values())  # 87
 
 # Technique IDs that must NEVER match any of these postures. These are the
 # false positives the v0.3.1 precision overhaul eliminated. If any of these

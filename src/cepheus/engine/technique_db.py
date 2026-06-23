@@ -120,10 +120,12 @@ _IMPACT: dict[str, str] = {
     "cap_sys_module": "Load an arbitrary kernel module for immediate ring-0 code execution on the host.",
     "cap_sys_boot": "Reboot or power off the entire host node from inside the container — host-wide denial of service.",
     "cap_syslog": "Leak kernel pointers (KASLR bypass), turning unreliable kernel exploits into reliable host escapes.",
+    "cap_perfmon": "Read kernel/cross-process performance data to leak addresses and memory (KASLR bypass).",
     # ── MOUNT ──
     "docker_socket_mount": "Full control of the Docker daemon — launch a privileged container to own the host.",
     "procfs_core_pattern": "Host command execution as root by hijacking the kernel core-dump handler.",
     "procfs_modprobe_path": "Host command execution as root by hijacking the kernel modprobe helper.",
+    "podman_sock_mount": "Full control of the Podman engine — launch a privileged container to own the host.",
     "sysfs_uevent_helper": "Host command execution as root by hijacking the kernel uevent helper.",
     "procfs_sysrq": "Crash or reboot the host kernel — host-wide denial of service.",
     "sysfs_hugepages": "Kernel-parameter tampering via writable sysfs that can destabilize or compromise the host.",
@@ -168,6 +170,7 @@ _IMPACT: dict[str, str] = {
     "lsm_apparmor_unconfined": "No AppArmor confinement — removes the MAC layer that blunts escape attempts.",
     "lsm_selinux_unconfined": "SELinux disabled/unconfined — removes the MAC layer that contains escapes.",
     "k8s_node_proxy": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
+    "host_pid_namespace": "Visibility and control of all host processes — read their secrets via /proc and signal them.",
     "cve_2025_23266": "NVIDIA Container Toolkit OCI-hook LD_PRELOAD abuse → container escape to the host.",
     "cve_2024_0132": "Malicious image abuses the NVIDIA Container Toolkit → host access.",
     "cve_2024_0133": "Crafted image uses a symlink to make the NVIDIA Container Toolkit write host files → host compromise.",
@@ -707,6 +710,43 @@ def _raw_techniques() -> list[EscapeTechnique]:
             ),
         ),
         EscapeTechnique(
+            id="cap_perfmon",
+            name="Kernel memory disclosure via CAP_PERFMON",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.MEDIUM,
+            description=(
+                "CAP_PERFMON (split out of CAP_SYS_ADMIN in kernel 5.8) permits "
+                "perf_event_open(2) and bypasses perf_event_paranoid, exposing "
+                "kernel and cross-process performance data that can leak "
+                "addresses and memory contents — a KASLR-defeating "
+                "information-disclosure primitive that strengthens kernel "
+                "exploitation toward host escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_PERFMON",
+                    description="Requires CAP_PERFMON capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1082"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.6,
+            stealth=0.5,
+            remediation="--cap-drop=PERFMON",
+            cli_flag="--cap-drop=PERFMON",
+            # CAP_PERFMON is capability bit 38. Holding it lets perf_event_open
+            # bypass perf_event_paranoid, so the bit check confirms the real
+            # disclosure primitive. The probe only reads CapEff.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); [ -n \"$b\" ] && [ $((0x$b & (1 << 38))) -ne 0 ]"
+            ),
+        ),
+        EscapeTechnique(
             id="ebpf_probe_write_user",
             name="bpf_probe_write_user kernel manipulation",
             category=TechniqueCategory.CAPABILITY,
@@ -782,6 +822,36 @@ def _raw_techniques() -> list[EscapeTechnique]:
             stealth=0.2,
             remediation="Never mount Docker socket into containers",
             verify_command="[ -S /var/run/docker.sock ] && [ -w /var/run/docker.sock ]",
+        ),
+        EscapeTechnique(
+            id="podman_sock_mount",
+            name="Podman socket mounted — host command exec",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "The Podman API socket (/run/podman/podman.sock) is mounted and "
+                "writable inside the container. Like the Docker socket, it grants "
+                "full control of the container engine — an attacker can launch a "
+                "privileged container that mounts the host filesystem and escape. "
+                "Completes socket-mount coverage alongside docker/containerd/cri-o."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/run/podman/podman.sock",
+                    description="Podman socket must be mounted and writable",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.95,
+            stealth=0.2,
+            remediation="Never mount the Podman socket into containers",
+            verify_command="[ -S /run/podman/podman.sock ] && [ -w /run/podman/podman.sock ]",
         ),
         EscapeTechnique(
             id="procfs_core_pattern",
@@ -1991,7 +2061,43 @@ def _raw_techniques() -> list[EscapeTechnique]:
             # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
             verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
         ),
-        # ── RUNTIME (14) ─────────────────────────────────────────────
+        # ── RUNTIME (15) ─────────────────────────────────────────────
+        EscapeTechnique(
+            id="host_pid_namespace",
+            name="Shared host PID namespace",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "The container shares the host PID namespace (hostPID:true), so "
+                "it sees every host process. Even without CAP_SYS_PTRACE this "
+                "exposes host process command lines and /proc/<pid>/environ "
+                "(secrets, tokens) and allows signalling host processes; "
+                "combined with CAP_SYS_PTRACE it escalates to code injection "
+                "into host processes (see cap_sys_ptrace)."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="namespaces.pid",
+                    check_type="equals",
+                    check_value=False,
+                    description="PID namespace must be shared with host (hostPID:true)",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1057", "T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="--pid=container (do not set hostPID: true)",
+            cli_flag="--pid=container",
+            # PID 2 is kthreadd, a host kernel thread. It is visible only when
+            # the PID namespace is shared with the host — in a private container
+            # PID namespace /proc/2 is absent or is some container process. Seeing
+            # kthreadd genuinely proves the shared-host-PID primitive.
+            verify_command="grep -q kthreadd /proc/2/comm 2>/dev/null",
+        ),
         EscapeTechnique(
             id="k8s_service_account",
             name="K8s SA token privilege escalation",

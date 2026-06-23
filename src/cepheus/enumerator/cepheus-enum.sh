@@ -766,6 +766,7 @@ collect_writable_paths() {
         /var/run/docker.sock \
         /run/containerd/containerd.sock \
         /var/run/crio/crio.sock \
+        /run/podman/podman.sock \
         /proc/acpi/alarm \
         /proc/sys/vm \
         /proc/self/fd \

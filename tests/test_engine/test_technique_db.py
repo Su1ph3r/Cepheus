@@ -9,8 +9,8 @@ from cepheus.engine.poc_templates import POC_TEMPLATES
 
 
 def test_technique_count():
-    """Database should have exactly 72 techniques."""
-    assert len(get_all_techniques()) == 72
+    """Database should have exactly 75 techniques."""
+    assert len(get_all_techniques()) == 75
 
 
 def test_concurrent_cold_cache_builds_singleton_once(monkeypatch):
@@ -45,7 +45,7 @@ def test_concurrent_cold_cache_builds_singleton_once(monkeypatch):
         t.join()
 
     assert len(calls) == 1, f"_build_techniques ran {len(calls)} times under contention, expected 1"
-    assert all(len(r) == 72 for r in results)
+    assert all(len(r) == 75 for r in results)
 
 
 def test_no_duplicate_ids():
