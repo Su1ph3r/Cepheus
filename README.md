@@ -13,8 +13,8 @@ viewer for the results.
 
 Two components, one pipeline:
 
-1. **Enumerator** — an 849-line POSIX shell script with no external
-   dependencies. It runs inside a container (busybox sh, dash, or bash; works
+1. **Enumerator** — a dependency-free POSIX shell script. It runs inside a
+   container (busybox sh, dash, or bash; works
    in distroless/scratch when a shell is present) and dumps the security
    posture to JSON: capabilities, mounts and filesystem types, kernel version,
    cgroup version, seccomp mode, AppArmor/SELinux profiles, namespace
@@ -26,10 +26,19 @@ Two components, one pipeline:
    two-step pairings such as info-disclosure → escalation), scores each chain
    by a composite of reliability, stealth, and confidence, and renders the
    result in the format you ask for.
+3. **Live confirmation** — a static match is a *hypothesis*, not a finding.
+   When a live container is available (`scan -c` or `analyze -c`), Cepheus runs
+   each technique's non-destructive verifier inside it and reports **only the
+   escapes it can actually confirm** by default. This is the precision-first
+   default that keeps a report from becoming a wall of theoretical matches.
 
 Chains are ranked highest-score-first. Missing posture data falls back to a
 low confidence rather than dropping the technique, so a partial enumeration
-still produces signal.
+still produces signal. Each chain carries a confirmation verdict —
+**CONFIRMED** (the verifier demonstrated the primitive), **POTENTIAL**
+(matched but not yet confirmed), or **UNVERIFIABLE** (no automated probe
+exists, e.g. a kernel CVE) — so a reader never mistakes a hypothesis for a
+demonstrated escape.
 
 ## Install
 
@@ -66,9 +75,16 @@ pip install -e '.[dev,html,llm]'
 ## Quick start
 
 ```bash
-# Capture posture from a running container, then analyze it
+# One shot against a live container: enumerate + analyze + live-confirm,
+# reporting only the escapes Cepheus can actually demonstrate
+cepheus scan --container-id mycontainer
+
+# Capture posture from a running container, then analyze it (offline)
 cepheus enumerate --container-id mycontainer -o posture.json
 cepheus analyze posture.json
+
+# Analyze a captured posture but live-confirm against the running container
+cepheus analyze posture.json --container-id mycontainer
 
 # Or enumerate an image directly (spins up an ephemeral container)
 cepheus enumerate --image nginx:1.27-alpine -o posture.json
@@ -81,7 +97,8 @@ cepheus ci nginx:1.27-alpine --max-severity critical
 
 | Command | Purpose |
 |---------|---------|
-| `analyze` | Analyze a posture JSON and report escape chains. |
+| `scan` | Enumerate + analyze + live-confirm a running container in one shot; reports only confirmed escapes by default. |
+| `analyze` | Analyze a posture JSON and report escape chains; pass `--container-id` to live-confirm. |
 | `ci` | Enumerate + analyze + gate a build; emits SARIF for Code Scanning. |
 | `verify` | Run non-destructive probes against a live container to confirm matched techniques. |
 | `enumerate` | Capture posture JSON from a running container or an image. |
@@ -112,9 +129,11 @@ cepheus techniques --severity critical
 
 ## Output formats
 
-`analyze`, `ci`, and `verify` render to terminal tables, JSON, or SARIF 2.1.0;
-`analyze` additionally emits HTML reports and MITRE ATT&CK Navigator layers.
-SARIF is the default for `ci` because GitHub Code Scanning ingests it directly.
+`scan`, `analyze`, `ci`, and `verify` render to terminal tables, JSON, or
+SARIF 2.1.0; `analyze` and `scan` additionally emit HTML reports and MITRE
+ATT&CK Navigator layers. The terminal and JSON/SARIF output carry each chain's
+confirmation verdict when a live confirmation pass has run. SARIF is the
+default for `ci` because GitHub Code Scanning ingests it directly.
 
 Every SARIF finding carries the data a reviewer needs to triage it without
 re-running the tool: **severity**, the **affected component(s)** (the container
@@ -151,7 +170,7 @@ cepheus ci my-app:${GITHUB_SHA} --baseline baseline.sarif --fail-on-new -f sarif
 A dedicated GitHub Action wraps this for one-line use:
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v1.0.1
+- uses: Su1ph3r/cepheus-action@v1.1.0
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
@@ -192,10 +211,34 @@ or raises its score, so a clean rollout doesn't break CI.
 
 ## Live verification
 
-`analyze` reports what *could* be exploitable from static posture. `verify`
-confirms it: for each matched technique with a probe, it runs a
+A static posture match reports what *could* be exploitable. Live verification
+confirms it: for each matched technique with a probe, Cepheus runs a
 non-destructive check inside the live container and classifies the outcome as
 CONFIRMED, NOT_CONFIRMED, NO_VERIFIER, or ERROR.
+
+The fastest path is `scan`, which folds confirmation into the default flow and
+surfaces **only confirmed escapes**:
+
+```bash
+# enumerate + analyze + confirm; report only what is actually exploitable
+cepheus scan --container-id mycontainer
+
+# include unproven (potential / unverifiable) matches too
+cepheus scan --container-id mycontainer --show-potential
+
+# confirm a previously captured posture against its live container
+cepheus analyze posture.json --container-id mycontainer
+```
+
+Each surviving chain is tagged **CONFIRMED**, **POTENTIAL**, or
+**UNVERIFIABLE**. By default only CONFIRMED chains are shown; refuted matches
+(the verifier rejected them) are dropped entirely. Some CVE probes only prove a
+*precondition* (a GPU device is present, a build socket is reachable) rather
+than the version-specific bug — a pass on those is reported as POTENTIAL, not
+CONFIRMED, so a fully patched host is never flagged as a confirmed escape.
+
+The lower-level `verify` command runs the probes against an existing analysis
+without the confirmed-only gating:
 
 ```bash
 cepheus verify --container-id mycontainer
@@ -214,19 +257,22 @@ properties, the HTML report, and the web viewer. Absence of a mapping means
 
 ## Technique coverage
 
-65 techniques across 6 categories:
+75 techniques across 6 categories:
 
-- **Capability-based** (9): SYS_ADMIN, SYS_PTRACE, DAC_READ_SEARCH,
-  DAC_OVERRIDE, NET_ADMIN, SYS_RAWIO, BPF `probe_write_user`, and more.
-- **Mount-based** (15): docker.sock, containerd/CRI-O sockets, core_pattern,
-  sysrq, sysfs, host path mounts, cgroup fs, `/dev`, shared `/dev/shm`,
-  `/proc/self/fd`, device-mapper, `/proc/sys/vm`.
-- **Kernel CVE-based** (17): CVE-2022-0185, CVE-2022-0847 (DirtyPipe),
+- **Capability-based** (13): SYS_ADMIN, SYS_MODULE, SYS_PTRACE, SYS_BOOT,
+  SYSLOG, PERFMON, DAC_READ_SEARCH, DAC_OVERRIDE, NET_ADMIN, SYS_RAWIO, BPF
+  `probe_write_user`, and more.
+- **Mount-based** (18): docker.sock, podman/containerd/CRI-O sockets,
+  core_pattern, modprobe, `/sys/kernel/uevent_helper`, sysrq, sysfs, host path
+  mounts, cgroup fs, `/dev`, shared `/dev/shm`, `/proc/self/fd`, device-mapper,
+  `/proc/sys/vm`.
+- **Kernel CVE-based** (18): CVE-2022-0185, CVE-2022-0847 (DirtyPipe),
   CVE-2024-1086, CVE-2024-21626 (Leaky Vessels), CVE-2025-21756, the
-  CVE-2024-23651/23652 BuildKit pair, and more.
-- **Runtime / orchestrator** (14): K8s service account, kubelet API, etcd,
-  Docker API, containerd-shim, runc CVE-2019-5736, cloud metadata SSRF,
-  NVIDIA Container Toolkit CVEs, ingress-nginx CVE-2025-1974.
+  CVE-2024-23651/23652/23653 BuildKit set, and more.
+- **Runtime / orchestrator** (16): K8s service account, kubelet API, etcd,
+  Docker API, containerd-shim, shared host PID namespace, runc CVE-2019-5736,
+  cloud metadata SSRF, NVIDIA Container Toolkit CVEs (CVE-2024-0132/0133,
+  CVE-2025-23266), ingress-nginx CVE-2025-1974.
 - **Combinatorial** (6): multi-prerequisite escapes plus dynamic two-step
   chain building.
 - **Information disclosure** (4): env-var secrets, cloud metadata credentials,

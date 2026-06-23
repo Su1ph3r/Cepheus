@@ -9,6 +9,7 @@ detail and may change in a minor release.
 from cepheus.engine.analyzer import analyze
 from cepheus.engine.baseline import diff as baseline_diff
 from cepheus.engine.baseline import load_baseline
+from cepheus.engine.confirmation import apply_confirmation, mark_unconfirmed
 from cepheus.engine.differ import diff_postures
 from cepheus.engine.technique_db import (
     get_all_techniques,
@@ -20,6 +21,8 @@ from cepheus.engine.verifier import verify_analysis
 __all__ = [
     "analyze",
     "verify_analysis",
+    "apply_confirmation",
+    "mark_unconfirmed",
     "load_baseline",
     "baseline_diff",
     "diff_postures",
