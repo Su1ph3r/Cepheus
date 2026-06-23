@@ -76,7 +76,7 @@ def test_analyze_pod_runs_and_returns_metadata():
     assert report.name == "api-1"
     assert report.node == "node-1"
     assert report.error is None
-    assert report.total_techniques_checked == 68
+    assert report.total_techniques_checked == 72
 
 
 def test_analyze_pod_privileged_pod_yields_critical_chain():

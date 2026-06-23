@@ -118,6 +118,8 @@ _IMPACT: dict[str, str] = {
     "cap_sys_rawio": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
     "ebpf_probe_write_user": "Kernel-assisted writes to process memory, escalating to host code execution.",
     "cap_sys_module": "Load an arbitrary kernel module for immediate ring-0 code execution on the host.",
+    "cap_sys_boot": "Reboot or power off the entire host node from inside the container — host-wide denial of service.",
+    "cap_syslog": "Leak kernel pointers (KASLR bypass), turning unreliable kernel exploits into reliable host escapes.",
     # ── MOUNT ──
     "docker_socket_mount": "Full control of the Docker daemon — launch a privileged container to own the host.",
     "procfs_core_pattern": "Host command execution as root by hijacking the kernel core-dump handler.",
@@ -154,6 +156,7 @@ _IMPACT: dict[str, str] = {
     "cve_2025_52881": "runc /proc write redirection → host file tampering during container setup.",
     "cve_2024_23651": "BuildKit cache-mount TOCTOU → host access at image-build time.",
     "cve_2024_23652": "BuildKit path traversal → arbitrary host file deletion at build time.",
+    "cve_2024_23653": "BuildKit unchecked security.insecure entitlement → privileged build container escapes to host.",
     # ── RUNTIME ──
     "k8s_service_account": "Service-account token abuse against the Kubernetes API enabling lateral movement.",
     "k8s_kubelet_api": "Command execution in any pod on the node via the unauthenticated kubelet API.",
@@ -167,6 +170,7 @@ _IMPACT: dict[str, str] = {
     "k8s_node_proxy": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
     "cve_2025_23266": "NVIDIA Container Toolkit OCI-hook LD_PRELOAD abuse → container escape to the host.",
     "cve_2024_0132": "Malicious image abuses the NVIDIA Container Toolkit → host access.",
+    "cve_2024_0133": "Crafted image uses a symlink to make the NVIDIA Container Toolkit write host files → host compromise.",
     "cve_2025_1974": "Unauthenticated RCE in the ingress-nginx admission webhook → cluster compromise.",
     "cve_2025_9074": "Docker Desktop container escape → access to the host from within a container.",
     # ── COMBINATORIAL ──
@@ -260,8 +264,10 @@ _PRECONDITION_ONLY_VERIFIERS: set[str] = {
     "cve_2024_23652",
     "cve_2025_23266",
     "cve_2024_0132",
+    "cve_2024_0133",
     "cve_2025_1974",
     "cve_2025_9074",
+    "cve_2024_23653",
 }
 
 
@@ -625,6 +631,79 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); "
                 '[ -n "$b" ] && [ $((0x$b & (1 << 16))) -ne 0 ] && '
                 '[ "$(cat /proc/sys/kernel/modules_disabled 2>/dev/null || echo 0)" = "0" ]'
+            ),
+        ),
+        EscapeTechnique(
+            id="cap_sys_boot",
+            name="Reboot the host via CAP_SYS_BOOT",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.HIGH,
+            description=(
+                "CAP_SYS_BOOT permits the reboot(2) syscall, which acts on the "
+                "host kernel regardless of the container boundary — a container "
+                "holding it can reboot or power off the entire node, a host-wide "
+                "denial of service."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_BOOT",
+                    description="Requires CAP_SYS_BOOT capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1529"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.85,
+            stealth=0.1,
+            remediation="--cap-drop=SYS_BOOT",
+            cli_flag="--cap-drop=SYS_BOOT",
+            # CAP_SYS_BOOT is capability bit 22. Holding it IS the primitive
+            # (reboot(2) acts on the host), so a passing bit check is a true
+            # confirmation. The probe only reads CapEff — it never calls reboot.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); [ -n \"$b\" ] && [ $((0x$b & (1 << 22))) -ne 0 ]"
+            ),
+        ),
+        EscapeTechnique(
+            id="cap_syslog",
+            name="Kernel address disclosure via CAP_SYSLOG",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.MEDIUM,
+            description=(
+                "CAP_SYSLOG permits syslog(2) (dmesg) and bypasses "
+                "kptr_restrict, exposing kernel pointers in the ring buffer and "
+                "via /proc. Those addresses defeat KASLR, turning an otherwise "
+                "unreliable kernel exploit into a reliable host escape — a "
+                "force-multiplier rather than a standalone escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYSLOG",
+                    description="Requires CAP_SYSLOG capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1082"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="--cap-drop=SYSLOG",
+            cli_flag="--cap-drop=SYSLOG",
+            # CAP_SYSLOG is capability bit 34. A pass means the capability is
+            # held AND kptr_restrict is not fully locked (2), so kernel pointers
+            # are actually leakable — the disclosure primitive is real.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); "
+                '[ -n "$b" ] && [ $((0x$b & (1 << 34))) -ne 0 ] && '
+                '[ "$(cat /proc/sys/kernel/kptr_restrict 2>/dev/null || echo 0)" != "2" ]'
             ),
         ),
         EscapeTechnique(
@@ -1872,6 +1951,46 @@ def _raw_techniques() -> list[EscapeTechnique]:
             # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
             verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
         ),
+        EscapeTechnique(
+            id="cve_2024_23653",
+            name="BuildKit Privileged Exec (CVE-2024-23653)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.CRITICAL,
+            description=(
+                "BuildKit's interactive containers API fails to validate "
+                "security.insecure entitlement, letting a malicious build run a "
+                "privileged container and escape to the host. Same scope as the "
+                "other Leaky Vessels BuildKit CVEs: build-time only, requires "
+                "access to a vulnerable BuildKit daemon."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runtime",
+                    check_type="regex",
+                    check_value="docker|containerd",
+                    description="Requires Docker or containerd runtime",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_docker_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "BuildKit exploitation requires reachability to the "
+                        "build daemon socket. See CVE-2024-23651 for scope notes."
+                    ),
+                    confidence_if_absent=0.1,
+                ),
+            ],
+            mitre_attack=["T1611", "T1068"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-23653"],
+            cve="CVE-2024-23653",
+            reliability=0.55,
+            stealth=0.3,
+            remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+            # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
+            verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
+        ),
         # ── RUNTIME (14) ─────────────────────────────────────────────
         EscapeTechnique(
             id="k8s_service_account",
@@ -2315,6 +2434,43 @@ def _raw_techniques() -> list[EscapeTechnique]:
             remediation="Upgrade NVIDIA Container Toolkit to >= 1.16.2.",
             # Same precondition as CVE-2025-23266: NVIDIA Container Toolkit
             # must have been the launcher. Probe device presence.
+            verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
+        ),
+        EscapeTechnique(
+            id="cve_2024_0133",
+            name="NVIDIA Container Toolkit Symlink Escape (CVE-2024-0133)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "Companion to CVE-2024-0132: a crafted container image can use a "
+                "symlink to cause the NVIDIA Container Toolkit to create files on "
+                "the host filesystem, enabling tampering that escalates to host "
+                "compromise. Same scope — only GPU workloads launched by the "
+                "vulnerable toolkit are affected."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="gpu.nvidia_devices",
+                    check_type="not_empty",
+                    check_value=None,
+                    description="NVIDIA GPU devices must be present",
+                ),
+                Prerequisite(
+                    check_field="gpu.nvidia_toolkit_version",
+                    check_type="version_lte",
+                    check_value="1.16.1",
+                    description="NVIDIA Container Toolkit <= 1.16.1 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-0133"],
+            cve="CVE-2024-0133",
+            reliability=0.6,
+            stealth=0.4,
+            remediation="Upgrade NVIDIA Container Toolkit to >= 1.16.2.",
+            # Precondition only: device presence proves a GPU workload, not the
+            # toolkit version — classified in _PRECONDITION_ONLY_VERIFIERS.
             verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
         ),
         EscapeTechnique(

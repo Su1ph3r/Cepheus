@@ -89,3 +89,62 @@ def test_new_techniques_have_real_primitive_verifiers():
 def test_hardened_container_still_clean_with_new_techniques():
     """The new detections must not light up a hardened container."""
     assert _ids(_base()) == set()
+
+
+# --- CAP_SYS_BOOT -----------------------------------------------------------
+def test_cap_sys_boot_fires_when_held():
+    posture = _base(capabilities=CapabilityInfo(effective=["CAP_SYS_BOOT"]))
+    assert "cap_sys_boot" in _ids(posture)
+
+
+def test_cap_sys_boot_silent_without_cap():
+    assert "cap_sys_boot" not in _ids(_base(capabilities=CapabilityInfo(effective=["CAP_KILL"])))
+
+
+# --- CAP_SYSLOG -------------------------------------------------------------
+def test_cap_syslog_fires_when_held():
+    posture = _base(capabilities=CapabilityInfo(effective=["CAP_SYSLOG"]))
+    assert "cap_syslog" in _ids(posture)
+
+
+def test_cap_syslog_silent_without_cap():
+    assert "cap_syslog" not in _ids(_base(capabilities=CapabilityInfo(effective=["CAP_KILL"])))
+
+
+# --- default caps must NOT produce noise ------------------------------------
+def test_default_docker_caps_do_not_fire_boot_or_syslog():
+    """CAP_SYS_BOOT and CAP_SYSLOG are NOT in the Docker/containerd default
+    capability set, so a default container must not trip them. (CAP_MKNOD,
+    which IS a default cap, was deliberately not added as a standalone finding
+    precisely to avoid firing on every container.)"""
+    default_caps = [
+        "CAP_CHOWN",
+        "CAP_DAC_OVERRIDE",
+        "CAP_FOWNER",
+        "CAP_FSETID",
+        "CAP_KILL",
+        "CAP_SETGID",
+        "CAP_SETUID",
+        "CAP_SETPCAP",
+        "CAP_NET_BIND_SERVICE",
+        "CAP_NET_RAW",
+        "CAP_SYS_CHROOT",
+        "CAP_MKNOD",
+        "CAP_AUDIT_WRITE",
+        "CAP_SETFCAP",
+    ]
+    ids = _ids(_base(capabilities=CapabilityInfo(effective=default_caps)))
+    assert "cap_sys_boot" not in ids
+    assert "cap_syslog" not in ids
+    assert "cap_sys_module" not in ids
+
+
+# --- CVE companions: precondition-only verifiers ----------------------------
+def test_cve_companions_present_and_precondition_only():
+    for tid in ("cve_2024_0133", "cve_2024_23653"):
+        t = get_technique_by_id(tid)
+        assert t is not None, tid
+        assert t.verify_command, tid
+        # Both confirm only a precondition (GPU device / build socket), never
+        # the version-specific bug, so a passing probe must stay POTENTIAL.
+        assert t.verify_confirms_primitive is False, tid
