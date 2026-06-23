@@ -117,9 +117,16 @@ _IMPACT: dict[str, str] = {
     "cap_net_admin": "Host network reconfiguration enabling traffic interception and ARP/DNS spoofing.",
     "cap_sys_rawio": "Direct disk and device access bypassing the filesystem, leading to host compromise.",
     "ebpf_probe_write_user": "Kernel-assisted writes to process memory, escalating to host code execution.",
+    "cap_sys_module": "Load an arbitrary kernel module for immediate ring-0 code execution on the host.",
+    "cap_sys_boot": "Reboot or power off the entire host node from inside the container — host-wide denial of service.",
+    "cap_syslog": "Leak kernel pointers (KASLR bypass), turning unreliable kernel exploits into reliable host escapes.",
+    "cap_perfmon": "Read kernel/cross-process performance data to leak addresses and memory (KASLR bypass).",
     # ── MOUNT ──
     "docker_socket_mount": "Full control of the Docker daemon — launch a privileged container to own the host.",
     "procfs_core_pattern": "Host command execution as root by hijacking the kernel core-dump handler.",
+    "procfs_modprobe_path": "Host command execution as root by hijacking the kernel modprobe helper.",
+    "podman_sock_mount": "Full control of the Podman engine — launch a privileged container to own the host.",
+    "sysfs_uevent_helper": "Host command execution as root by hijacking the kernel uevent helper.",
     "procfs_sysrq": "Crash or reboot the host kernel — host-wide denial of service.",
     "sysfs_hugepages": "Kernel-parameter tampering via writable sysfs that can destabilize or compromise the host.",
     "hostpath_mount_etc": "Write host /etc (passwd/shadow/cron) to gain persistent root on the node.",
@@ -151,6 +158,7 @@ _IMPACT: dict[str, str] = {
     "cve_2025_52881": "runc /proc write redirection → host file tampering during container setup.",
     "cve_2024_23651": "BuildKit cache-mount TOCTOU → host access at image-build time.",
     "cve_2024_23652": "BuildKit path traversal → arbitrary host file deletion at build time.",
+    "cve_2024_23653": "BuildKit unchecked security.insecure entitlement → privileged build container escapes to host.",
     # ── RUNTIME ──
     "k8s_service_account": "Service-account token abuse against the Kubernetes API enabling lateral movement.",
     "k8s_kubelet_api": "Command execution in any pod on the node via the unauthenticated kubelet API.",
@@ -162,8 +170,10 @@ _IMPACT: dict[str, str] = {
     "lsm_apparmor_unconfined": "No AppArmor confinement — removes the MAC layer that blunts escape attempts.",
     "lsm_selinux_unconfined": "SELinux disabled/unconfined — removes the MAC layer that contains escapes.",
     "k8s_node_proxy": "Kubelet proxy abuse to reach other pods and services on the node for lateral movement.",
+    "host_pid_namespace": "Visibility and control of all host processes — read their secrets via /proc and signal them.",
     "cve_2025_23266": "NVIDIA Container Toolkit OCI-hook LD_PRELOAD abuse → container escape to the host.",
     "cve_2024_0132": "Malicious image abuses the NVIDIA Container Toolkit → host access.",
+    "cve_2024_0133": "Crafted image uses a symlink to make the NVIDIA Container Toolkit write host files → host compromise.",
     "cve_2025_1974": "Unauthenticated RCE in the ingress-nginx admission webhook → cluster compromise.",
     "cve_2025_9074": "Docker Desktop container escape → access to the host from within a container.",
     # ── COMBINATORIAL ──
@@ -215,11 +225,78 @@ def _apply_impact(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
     return techs
 
 
+# Techniques whose ``verify_command`` only proves a PRECONDITION, not the
+# exploitable primitive itself. A passing probe here means "the necessary
+# condition is present" — NOT "this concrete host is exploitable". The
+# confirmation layer downgrades a pass on these from CONFIRMED to POTENTIAL so
+# a patched-but-precondition-present host (e.g. a GPU node running a FIXED
+# NVIDIA toolkit, or an unpatched-range kernel that's actually backported) is
+# never reported as a confirmed escape. A FAIL still refutes — an absent
+# precondition means the CVE cannot be exploited here at all.
+#
+# Rationale per entry:
+#   - unshare-based kernel CVEs: `unshare -Ur...` proves user-namespace
+#     creation is permitted (the delivery vector) but a PATCHED kernel still
+#     permits unshare — so a pass does not prove the bug is present.
+#   - DirtyPipe: the verifier is a uname version-range check — opportunistic,
+#     identical to the kernel-range static signal, not a primitive proof.
+#   - cap-bit CVEs (BPF): a CapEff probe proves the capability is held, not
+#     that the kernel's BPF verifier is the vulnerable version.
+#   - BuildKit/Docker-Desktop: socket / runtime-marker presence is the
+#     precondition (reachable build daemon / Docker Desktop), not the race/
+#     version bug.
+#   - NVIDIA toolkit CVEs: GPU device presence is the precondition; it says
+#     nothing about the toolkit version.
+#   - IngressNightmare: DNS resolution proves the admission controller is
+#     deployed and reachable, not that it is a vulnerable version.
+# Deliberately ABSENT (these verifiers DO prove the primitive, stay CONFIRMED):
+#   - cve_2024_21626 (runc leaked fd): readlink finds a live leaked host fd —
+#     that IS the exploitable primitive, not merely a precondition.
+#   - all misconfig probes (privileged, cap SYS_ADMIN mount, writable
+#     docker.sock, hostPath): they exercise the actual operation.
+_PRECONDITION_ONLY_VERIFIERS: set[str] = {
+    "cve_2022_0185",
+    "cve_2021_22555",
+    "cve_2022_2588",
+    "cve_2023_0386",
+    "cve_2023_32233",
+    "cve_2024_1086",
+    "cve_2022_0847",
+    "cve_2022_23222",
+    "cve_2024_23651",
+    "cve_2024_23652",
+    "cve_2025_23266",
+    "cve_2024_0132",
+    "cve_2024_0133",
+    "cve_2025_1974",
+    "cve_2025_9074",
+    "cve_2024_23653",
+}
+
+
+def _apply_verify_semantics(techs: list[EscapeTechnique]) -> list[EscapeTechnique]:
+    """Mark precondition-only verifiers (see ``_PRECONDITION_ONLY_VERIFIERS``).
+
+    Side-car pattern so the classification lives in one auditable place rather
+    than a flag scattered across CVE constructors. A defensive guard rejects
+    an entry that names a technique with no verifier at all — that's almost
+    certainly a typo'd id, and silently ignoring it would let a CVE keep
+    over-confirming.
+    """
+    by_id = {t.id: t for t in techs}
+    for tid in _PRECONDITION_ONLY_VERIFIERS:
+        t = by_id.get(tid)
+        if t is not None and t.verify_command:
+            t.verify_confirms_primitive = False
+    return techs
+
+
 def _build_techniques() -> list[EscapeTechnique]:
     """Build and return all 65 escape techniques."""
     techs = _raw_techniques()
     techs = _apply_compliance(techs)
-    return _apply_impact(techs)
+    techs = _apply_impact(techs)
+    return _apply_verify_semantics(techs)
 
 
 def _raw_techniques() -> list[EscapeTechnique]:
@@ -519,6 +596,157 @@ def _raw_techniques() -> list[EscapeTechnique]:
             verify_command="for d in /dev/sda /dev/vda /dev/nvme0n1; do [ -r $d ] && dd if=$d of=/dev/null bs=1 count=0 2>/dev/null && exit 0; done; exit 1",
         ),
         EscapeTechnique(
+            id="cap_sys_module",
+            name="Load kernel module via CAP_SYS_MODULE",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.CRITICAL,
+            description=(
+                "CAP_SYS_MODULE permits the init_module/finit_module syscalls, "
+                "letting an attacker load an arbitrary kernel module and execute "
+                "code in ring 0 on the host — an immediate, total container "
+                "escape. The only gates are the capability itself and whether "
+                "module loading has been globally disabled "
+                "(/proc/sys/kernel/modules_disabled)."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_MODULE",
+                    description="Requires CAP_SYS_MODULE capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611", "T1547.006"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.9,
+            stealth=0.2,
+            remediation="--cap-drop=SYS_MODULE",
+            cli_flag="--cap-drop=SYS_MODULE",
+            # CAP_SYS_MODULE is capability bit 16. A passing probe means the
+            # capability is held AND module loading is not globally disabled —
+            # the loadable-module primitive is genuinely available, so this is a
+            # true confirmation (not precondition-only).
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); "
+                '[ -n "$b" ] && [ $((0x$b & (1 << 16))) -ne 0 ] && '
+                '[ "$(cat /proc/sys/kernel/modules_disabled 2>/dev/null || echo 0)" = "0" ]'
+            ),
+        ),
+        EscapeTechnique(
+            id="cap_sys_boot",
+            name="Reboot the host via CAP_SYS_BOOT",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.HIGH,
+            description=(
+                "CAP_SYS_BOOT permits the reboot(2) syscall, which acts on the "
+                "host kernel regardless of the container boundary — a container "
+                "holding it can reboot or power off the entire node, a host-wide "
+                "denial of service."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_BOOT",
+                    description="Requires CAP_SYS_BOOT capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1529"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.85,
+            stealth=0.1,
+            remediation="--cap-drop=SYS_BOOT",
+            cli_flag="--cap-drop=SYS_BOOT",
+            # CAP_SYS_BOOT is capability bit 22. Holding it IS the primitive
+            # (reboot(2) acts on the host), so a passing bit check is a true
+            # confirmation. The probe only reads CapEff — it never calls reboot.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); [ -n \"$b\" ] && [ $((0x$b & (1 << 22))) -ne 0 ]"
+            ),
+        ),
+        EscapeTechnique(
+            id="cap_syslog",
+            name="Kernel address disclosure via CAP_SYSLOG",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.MEDIUM,
+            description=(
+                "CAP_SYSLOG permits syslog(2) (dmesg) and bypasses "
+                "kptr_restrict, exposing kernel pointers in the ring buffer and "
+                "via /proc. Those addresses defeat KASLR, turning an otherwise "
+                "unreliable kernel exploit into a reliable host escape — a "
+                "force-multiplier rather than a standalone escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYSLOG",
+                    description="Requires CAP_SYSLOG capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1082"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="--cap-drop=SYSLOG",
+            cli_flag="--cap-drop=SYSLOG",
+            # CAP_SYSLOG is capability bit 34. A pass means the capability is
+            # held AND kptr_restrict is not fully locked (2), so kernel pointers
+            # are actually leakable — the disclosure primitive is real.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); "
+                '[ -n "$b" ] && [ $((0x$b & (1 << 34))) -ne 0 ] && '
+                '[ "$(cat /proc/sys/kernel/kptr_restrict 2>/dev/null || echo 0)" != "2" ]'
+            ),
+        ),
+        EscapeTechnique(
+            id="cap_perfmon",
+            name="Kernel memory disclosure via CAP_PERFMON",
+            category=TechniqueCategory.CAPABILITY,
+            severity=Severity.MEDIUM,
+            description=(
+                "CAP_PERFMON (split out of CAP_SYS_ADMIN in kernel 5.8) permits "
+                "perf_event_open(2) and bypasses perf_event_paranoid, exposing "
+                "kernel and cross-process performance data that can leak "
+                "addresses and memory contents — a KASLR-defeating "
+                "information-disclosure primitive that strengthens kernel "
+                "exploitation toward host escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_PERFMON",
+                    description="Requires CAP_PERFMON capability",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1082"],
+            references=[
+                "https://man7.org/linux/man-pages/man7/capabilities.7.html",
+            ],
+            reliability=0.6,
+            stealth=0.5,
+            remediation="--cap-drop=PERFMON",
+            cli_flag="--cap-drop=PERFMON",
+            # CAP_PERFMON is capability bit 38. Holding it lets perf_event_open
+            # bypass perf_event_paranoid, so the bit check confirms the real
+            # disclosure primitive. The probe only reads CapEff.
+            verify_command=(
+                "b=$(awk '/^CapEff:/ {print $2}' /proc/self/status); [ -n \"$b\" ] && [ $((0x$b & (1 << 38))) -ne 0 ]"
+            ),
+        ),
+        EscapeTechnique(
             id="ebpf_probe_write_user",
             name="bpf_probe_write_user kernel manipulation",
             category=TechniqueCategory.CAPABILITY,
@@ -578,13 +806,13 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_value=True,
                     description="Docker socket must be reachable",
                 ),
-                Prerequisite(
-                    check_field="available_tools",
-                    check_type="contains",
-                    check_value="curl",
-                    confidence_if_absent=0.5,
-                    description="curl or similar HTTP client available",
-                ),
+                # NOTE: the old `available_tools contains curl` prerequisite is
+                # removed. `contains` returns 0.0 (a HARD FAIL) when curl is
+                # absent, so the technique NEVER fired on the many images without
+                # curl (alpine, busybox, distroless) — even though a mounted,
+                # writable docker.sock is a full escape regardless of which HTTP
+                # client is installed. The reachable+writable socket IS the
+                # primitive; the tool-free verify_command below confirms it.
             ],
             mitre_attack=["T1611"],
             references=[
@@ -594,6 +822,36 @@ def _raw_techniques() -> list[EscapeTechnique]:
             stealth=0.2,
             remediation="Never mount Docker socket into containers",
             verify_command="[ -S /var/run/docker.sock ] && [ -w /var/run/docker.sock ]",
+        ),
+        EscapeTechnique(
+            id="podman_sock_mount",
+            name="Podman socket mounted — host command exec",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "The Podman API socket (/run/podman/podman.sock) is mounted and "
+                "writable inside the container. Like the Docker socket, it grants "
+                "full control of the container engine — an attacker can launch a "
+                "privileged container that mounts the host filesystem and escape. "
+                "Completes socket-mount coverage alongside docker/containerd/cri-o."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/run/podman/podman.sock",
+                    description="Podman socket must be mounted and writable",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.95,
+            stealth=0.2,
+            remediation="Never mount the Podman socket into containers",
+            verify_command="[ -S /run/podman/podman.sock ] && [ -w /run/podman/podman.sock ]",
         ),
         EscapeTechnique(
             id="procfs_core_pattern",
@@ -635,6 +893,79 @@ def _raw_techniques() -> list[EscapeTechnique]:
             stealth=0.3,
             remediation="Mount /proc read-only or use seccomp",
             verify_command="exec 3>>/proc/sys/kernel/core_pattern && exec 3>&-",
+        ),
+        EscapeTechnique(
+            id="procfs_modprobe_path",
+            name="Overwrite /proc/sys/kernel/modprobe",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "If /proc/sys/kernel/modprobe is writable AND the container has "
+                "CAP_SYS_ADMIN, an attacker can repoint the kernel's modprobe "
+                "helper at an attacker-controlled script, then trigger an "
+                "auto-modprobe (e.g. executing a file with an unknown binfmt or "
+                "opening a socket for an unregistered protocol) to run that "
+                "script as root on the host. Like core_pattern, the kernel "
+                "rejects writes to /proc/sys/kernel/* without CAP_SYS_ADMIN even "
+                "when the procfs mount looks writable."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/proc/sys/kernel/modprobe",
+                    description="/proc/sys/kernel/modprobe must be writable",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="capabilities.effective",
+                    check_type="contains",
+                    check_value="CAP_SYS_ADMIN",
+                    description=(
+                        "CAP_SYS_ADMIN required for the kernel to honor writes "
+                        "to /proc/sys/kernel/* — DAC-only access yields EROFS"
+                    ),
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611", "T1547.006"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.8,
+            stealth=0.35,
+            remediation="Mount /proc read-only or drop CAP_SYS_ADMIN",
+            verify_command="exec 3>>/proc/sys/kernel/modprobe && exec 3>&-",
+        ),
+        EscapeTechnique(
+            id="sysfs_uevent_helper",
+            name="Overwrite /sys/kernel/uevent_helper",
+            category=TechniqueCategory.MOUNT,
+            severity=Severity.CRITICAL,
+            description=(
+                "If /sys/kernel/uevent_helper is writable (a host /sys mounted "
+                "read-write, typical of privileged containers), an attacker can "
+                "set it to an attacker-controlled path and then trigger a uevent "
+                "(e.g. `echo change > /sys/.../uevent`). The kernel runs the "
+                "helper as root in the host's initial namespace — a full escape."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="writable_paths",
+                    check_type="contains",
+                    check_value="/sys/kernel/uevent_helper",
+                    description="/sys/kernel/uevent_helper must be writable",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.85,
+            stealth=0.3,
+            remediation="Mount /sys read-only",
+            verify_command="exec 3>>/sys/kernel/uevent_helper && exec 3>&-",
         ),
         EscapeTechnique(
             id="procfs_sysrq",
@@ -1423,8 +1754,16 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_field="runtime.runc_version",
                     check_type="version_lte",
                     check_value="1.1.11",
-                    confidence_if_absent=0.5,
-                    description="runc <= 1.1.11 is vulnerable",
+                    confidence_if_absent=0.0,
+                    description=(
+                        "runc <= 1.1.11 is vulnerable. The runc version is NOT "
+                        "observable from inside a container, so "
+                        "confidence_if_absent=0.0: this CVE does not fire from "
+                        "in-container enumeration unless a posture supplies a "
+                        "known-vulnerable runc_version. Firing critical on every "
+                        "docker container with kernel<=6.7 (regardless of the "
+                        "actual runc version) was a false positive."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],
@@ -1682,7 +2021,83 @@ def _raw_techniques() -> list[EscapeTechnique]:
             # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
             verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
         ),
-        # ── RUNTIME (14) ─────────────────────────────────────────────
+        EscapeTechnique(
+            id="cve_2024_23653",
+            name="BuildKit Privileged Exec (CVE-2024-23653)",
+            category=TechniqueCategory.KERNEL,
+            severity=Severity.CRITICAL,
+            description=(
+                "BuildKit's interactive containers API fails to validate "
+                "security.insecure entitlement, letting a malicious build run a "
+                "privileged container and escape to the host. Same scope as the "
+                "other Leaky Vessels BuildKit CVEs: build-time only, requires "
+                "access to a vulnerable BuildKit daemon."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="runtime.runtime",
+                    check_type="regex",
+                    check_value="docker|containerd",
+                    description="Requires Docker or containerd runtime",
+                    confidence_if_absent=0.0,
+                ),
+                Prerequisite(
+                    check_field="network.can_reach_docker_sock",
+                    check_type="equals",
+                    check_value=True,
+                    description=(
+                        "BuildKit exploitation requires reachability to the "
+                        "build daemon socket. See CVE-2024-23651 for scope notes."
+                    ),
+                    confidence_if_absent=0.1,
+                ),
+            ],
+            mitre_attack=["T1611", "T1068"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-23653"],
+            cve="CVE-2024-23653",
+            reliability=0.55,
+            stealth=0.3,
+            remediation="Upgrade BuildKit to >= 0.12.5 and Docker to >= 25.0.2.",
+            # Same precondition as CVE-2024-23651 — BuildKit daemon reachable.
+            verify_command="[ -S /var/run/docker.sock ] || [ -S /run/buildkit/buildkitd.sock ] || [ -S /var/run/buildkit/buildkitd.sock ]",
+        ),
+        # ── RUNTIME (15) ─────────────────────────────────────────────
+        EscapeTechnique(
+            id="host_pid_namespace",
+            name="Shared host PID namespace",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "The container shares the host PID namespace (hostPID:true), so "
+                "it sees every host process. Even without CAP_SYS_PTRACE this "
+                "exposes host process command lines and /proc/<pid>/environ "
+                "(secrets, tokens) and allows signalling host processes; "
+                "combined with CAP_SYS_PTRACE it escalates to code injection "
+                "into host processes (see cap_sys_ptrace)."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="namespaces.pid",
+                    check_type="equals",
+                    check_value=False,
+                    description="PID namespace must be shared with host (hostPID:true)",
+                    confidence_if_absent=0.0,
+                ),
+            ],
+            mitre_attack=["T1057", "T1611"],
+            references=[
+                "https://book.hacktricks.xyz/linux-hardening/privilege-escalation/docker-security/docker-breakout-privilege-escalation",
+            ],
+            reliability=0.7,
+            stealth=0.5,
+            remediation="--pid=container (do not set hostPID: true)",
+            cli_flag="--pid=container",
+            # PID 2 is kthreadd, a host kernel thread. It is visible only when
+            # the PID namespace is shared with the host — in a private container
+            # PID namespace /proc/2 is absent or is some container process. Seeing
+            # kthreadd genuinely proves the shared-host-PID primitive.
+            verify_command="grep -q kthreadd /proc/2/comm 2>/dev/null",
+        ),
         EscapeTechnique(
             id="k8s_service_account",
             name="K8s SA token privilege escalation",
@@ -1957,8 +2372,14 @@ def _raw_techniques() -> list[EscapeTechnique]:
                 Prerequisite(
                     check_field="security.apparmor",
                     check_type="equals",
-                    check_value=None,
-                    description="AppArmor must be unconfined (None)",
+                    check_value="unconfined",
+                    description=(
+                        "AppArmor must be KNOWN-unconfined. A null/unknown value "
+                        "(enumerator could not read the profile, or the PodSpec "
+                        "importer cannot determine it) is NOT treated as "
+                        "unconfined — that produced a false positive on every "
+                        "static/unknown posture."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],
@@ -2122,6 +2543,43 @@ def _raw_techniques() -> list[EscapeTechnique]:
             verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
         ),
         EscapeTechnique(
+            id="cve_2024_0133",
+            name="NVIDIA Container Toolkit Symlink Escape (CVE-2024-0133)",
+            category=TechniqueCategory.RUNTIME,
+            severity=Severity.HIGH,
+            description=(
+                "Companion to CVE-2024-0132: a crafted container image can use a "
+                "symlink to cause the NVIDIA Container Toolkit to create files on "
+                "the host filesystem, enabling tampering that escalates to host "
+                "compromise. Same scope — only GPU workloads launched by the "
+                "vulnerable toolkit are affected."
+            ),
+            prerequisites=[
+                Prerequisite(
+                    check_field="gpu.nvidia_devices",
+                    check_type="not_empty",
+                    check_value=None,
+                    description="NVIDIA GPU devices must be present",
+                ),
+                Prerequisite(
+                    check_field="gpu.nvidia_toolkit_version",
+                    check_type="version_lte",
+                    check_value="1.16.1",
+                    description="NVIDIA Container Toolkit <= 1.16.1 is vulnerable",
+                    confidence_if_absent=0.3,
+                ),
+            ],
+            mitre_attack=["T1611"],
+            references=["https://nvd.nist.gov/vuln/detail/CVE-2024-0133"],
+            cve="CVE-2024-0133",
+            reliability=0.6,
+            stealth=0.4,
+            remediation="Upgrade NVIDIA Container Toolkit to >= 1.16.2.",
+            # Precondition only: device presence proves a GPU workload, not the
+            # toolkit version — classified in _PRECONDITION_ONLY_VERIFIERS.
+            verify_command="[ -c /dev/nvidiactl ] || [ -c /dev/nvidia0 ] || [ -c /dev/nvidia-uvm ]",
+        ),
+        EscapeTechnique(
             id="cve_2025_1974",
             name="IngressNightmare Admission Webhook RCE (CVE-2025-1974)",
             category=TechniqueCategory.RUNTIME,
@@ -2191,6 +2649,21 @@ def _raw_techniques() -> list[EscapeTechnique]:
                     check_type="equals",
                     check_value="docker",
                     description="Requires Docker runtime",
+                ),
+                Prerequisite(
+                    check_field="runtime.runtime_version",
+                    check_type="version_lte",
+                    check_value="4.44.2",
+                    confidence_if_absent=0.0,
+                    description=(
+                        "Docker Desktop <= 4.44.2 is vulnerable (fixed in 4.44.3). "
+                        "The host Docker Desktop version is NOT observable from "
+                        "inside a container, so confidence_if_absent=0.0: this CVE "
+                        "does NOT fire from default in-container enumeration "
+                        "(claiming it on every Docker container regardless of "
+                        "version was a false positive). It fires only when a "
+                        "posture supplies a known-vulnerable runtime_version."
+                    ),
                 ),
             ],
             mitre_attack=["T1611"],

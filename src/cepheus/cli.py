@@ -113,6 +113,30 @@ def _validate_output_path(output: Path) -> None:
         raise typer.Exit(2)
 
 
+def _validate_container_id(container_id: str) -> None:
+    """Reject container IDs that don't match the safe charset before they reach
+    a `runtime exec` argv. Shared by every command that takes a live container."""
+    if not _CONTAINER_ID_RE.match(container_id):
+        console.print("[red]Error: Invalid container ID. Must match [a-zA-Z0-9][a-zA-Z0-9_.-]*[/red]")
+        raise typer.Exit(1)
+
+
+def _build_posture(data: Any):
+    """Validate a parsed posture dict into a ContainerPosture, exiting on error.
+
+    Narrow to ValidationError: anything else (AttributeError, TypeError)
+    indicates a refactor bug on the model side and should surface as a real
+    traceback so it gets fixed instead of buried in a friendly message.
+    """
+    from cepheus.models.posture import ContainerPosture
+
+    try:
+        return ContainerPosture.model_validate(data)
+    except ValidationError as e:
+        console.print(f"[red]Error: Invalid posture data: {e}[/red]")
+        raise typer.Exit(1)
+
+
 def _load_posture(posture_file: Path):
     """Load and validate a posture JSON file, exiting on errors."""
     if not posture_file.exists():
@@ -126,18 +150,7 @@ def _load_posture(posture_file: Path):
         raise typer.Exit(1)
 
     _require_posture_shape(data, source=str(posture_file))
-
-    from cepheus.models.posture import ContainerPosture
-
-    # Narrow to ValidationError: anything else (AttributeError, TypeError)
-    # indicates a refactor bug on the model side and should surface as a
-    # real traceback so it gets fixed instead of buried in a friendly
-    # "Invalid posture data" message.
-    try:
-        return ContainerPosture.model_validate(data)
-    except ValidationError as e:
-        console.print(f"[red]Error: Invalid posture data: {e}[/red]")
-        raise typer.Exit(1)
+    return _build_posture(data)
 
 
 def _run_analysis(
@@ -236,6 +249,58 @@ def _filter_by_severity(result: Any, min_severity: SeverityFilter) -> None:
     result.techniques_in_visible_chains = len(visible_ids)
 
 
+def _confirm_result(
+    result: Any,
+    container_id: str,
+    runtime: str,
+    *,
+    timeout: int = 10,
+) -> Any:
+    """Run live verification of ``result`` against ``container_id`` and stamp
+    each chain with a ConfirmationStatus. Returns the VerificationReport so the
+    caller can surface confirmed/refuted counts. Mutates ``result`` in place.
+    """
+    from cepheus.engine.confirmation import apply_confirmation
+    from cepheus.engine.verifier import verify_analysis
+
+    report = verify_analysis(result, container_id, runtime=runtime, timeout=timeout)
+    apply_confirmation(result, report)
+    return report
+
+
+def _gate_by_confirmation(result: Any, *, show_potential: bool) -> None:
+    """Drop chains that live verification did not CONFIRM. Mutates in place.
+
+    This is the confirmed-only default that fixes the "every finding was a
+    false positive" failure mode: after a live run, a chain is only shown if
+    the verifier actually demonstrated its primitive works. REFUTED chains
+    (static match the kernel/runtime rejected) are always dropped; POTENTIAL /
+    UNVERIFIABLE / ERROR chains (unproven) are hidden unless ``--show-potential``.
+
+    Call ONLY after a live ``_confirm_result``. For offline analysis (no
+    container) leave chains intact and let the renderer flag them UNCONFIRMED.
+    """
+    from cepheus.models.technique import ConfirmationStatus
+
+    keep_unproven = {
+        ConfirmationStatus.POTENTIAL,
+        ConfirmationStatus.UNVERIFIABLE,
+        ConfirmationStatus.ERROR,
+    }
+    kept = []
+    for chain in result.chains:
+        if chain.confirmation == ConfirmationStatus.CONFIRMED:
+            kept.append(chain)
+        elif show_potential and chain.confirmation in keep_unproven:
+            kept.append(chain)
+    result.chains = kept
+
+    # Keep remediations consistent with the chains the user will actually see.
+    surviving = {step.technique.id for chain in kept for step in chain.steps if step.technique is not None}
+    result.remediations = [r for r in result.remediations if r.technique_id in surviving]
+    result.techniques_in_visible_chains = len(surviving)
+
+
 def _render_output(
     result: Any,
     format: OutputFormat,
@@ -319,27 +384,114 @@ def analyze(
     min_severity: SeverityFilter = typer.Option(
         SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"
     ),
+    container_id: str | None = typer.Option(
+        None,
+        "--container-id",
+        "-c",
+        help=(
+            "Running container to live-verify matches against. When set, only "
+            "CONFIRMED escapes are shown by default (use --show-potential to "
+            "include unproven matches). Without it, matches are reported "
+            "UNCONFIRMED — static hypotheses, not demonstrated findings."
+        ),
+    ),
+    runtime: str = typer.Option("docker", "--runtime", "-r", help="Container runtime for verification (docker/podman)"),
+    show_potential: bool = typer.Option(
+        False,
+        "--show-potential",
+        help="With -c, also show matches that could not be confirmed (potential/unverifiable).",
+    ),
     llm: bool = typer.Option(False, "--llm", help="Enable LLM enrichment"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
     executive_summary: bool = typer.Option(
         False, "--executive-summary", help="Generate LLM executive summary (requires --llm)"
     ),
 ) -> None:
-    """Analyze a container posture JSON file and identify escape paths."""
+    """Analyze a container posture JSON file and identify escape paths.
+
+    Static matches are *hypotheses*, not findings. Pass ``-c <container>`` to
+    live-verify them: Cepheus runs each technique's non-destructive verifier
+    inside the container and, by default, surfaces only the escapes it can
+    actually confirm. This is the precision-first default — it avoids the
+    "wall of false positives" you get from static matching alone.
+    """
     posture = _load_posture(posture_file)
     config = CepheusConfig()
     # 1) Run engine + per-chain LLM hints on the full chain set.
     result = _run_analysis(posture, config, llm=llm)
     # 2) Filter to what the user requested.
     _filter_by_severity(result, min_severity)
-    # 3) Summarize what the user will see — runs after filter so the
+    # 3) Live confirmation (precision-first default) or offline labeling.
+    if container_id is not None:
+        _validate_container_id(container_id)
+        report = _confirm_result(result, container_id, runtime)
+        _gate_by_confirmation(result, show_potential=show_potential)
+        console.print(
+            f"[dim]Live verification: {report.confirmed_count} confirmed, "
+            f"{report.not_confirmed_count} refuted, "
+            f"{report.no_verifier_count} unverifiable, {report.error_count} errored.[/dim]"
+        )
+    else:
+        from cepheus.engine.confirmation import mark_unconfirmed
+
+        mark_unconfirmed(result)
+    # 4) Summarize what the user will see — runs after filter so the
     #    summary describes only visible chains (pre-0.3.5 bug: summary
     #    referenced chains the user had filtered out).
     if executive_summary:
         _run_executive_summary(result, llm=llm)
-    # 4) Render — auto_write_json preserves the documented analyze
+    # 5) Render — auto_write_json preserves the documented analyze
     #    back-compat where `-o X.json` writes JSON even without `--format json`.
     _render_output(result, format, output, auto_write_json=True)
+
+
+@app.command()
+def scan(
+    container_id: str = typer.Option(
+        ..., "--container-id", "-c", help="Running container ID or name to scan and confirm against"
+    ),
+    runtime: str = typer.Option("docker", "--runtime", "-r", help="Container runtime (docker/podman)"),
+    format: OutputFormat = typer.Option(OutputFormat.terminal, "--format", "-f", help="Output format"),
+    min_severity: SeverityFilter = typer.Option(
+        SeverityFilter.low, "--min-severity", "-s", help="Minimum severity to show"
+    ),
+    show_potential: bool = typer.Option(
+        False,
+        "--show-potential",
+        help="Also show matches that could not be confirmed (potential/unverifiable).",
+    ),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write report to file"),
+) -> None:
+    """Enumerate, analyze, and live-confirm a running container in one shot.
+
+    This is the precision-first command for live engagements: it enumerates the
+    container's posture, models escape chains, then runs each technique's
+    non-destructive verifier inside the container and reports ONLY the escapes
+    it can actually confirm. Unproven matches are suppressed by default (pass
+    ``--show-potential`` to include them).
+
+    Exit code 0 if at least one escape was CONFIRMED, 1 otherwise — so
+    ``cepheus scan -c app || echo clean`` works as a gate.
+    """
+    _validate_container_id(container_id)
+    posture_json = _enumerate_container(container_id, runtime)
+    data = _validate_posture_json(posture_json)
+    posture = _build_posture(data)
+    config = CepheusConfig()
+
+    result = _run_analysis(posture, config)
+    _filter_by_severity(result, min_severity)
+    report = _confirm_result(result, container_id, runtime)
+    _gate_by_confirmation(result, show_potential=show_potential)
+
+    confirmed = sum(1 for c in result.chains if c.confirmation is not None and c.confirmation.value == "confirmed")
+    console.print(
+        f"[dim]Live verification: {report.confirmed_count} confirmed, "
+        f"{report.not_confirmed_count} refuted, "
+        f"{report.no_verifier_count} unverifiable, {report.error_count} errored.[/dim]"
+    )
+    _render_output(result, format, output, auto_write_json=True)
+    raise typer.Exit(0 if confirmed > 0 else 1)
 
 
 class CIFormat(str, Enum):

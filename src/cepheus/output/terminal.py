@@ -23,10 +23,29 @@ SEVERITY_COLORS = {
     "low": "green",
 }
 
+# Confirmation status -> (display label, style). CONFIRMED is the only verdict
+# that represents a demonstrated finding; everything else is shown demoted so a
+# reader never mistakes an unproven static match for a real escape.
+CONFIRMATION_DISPLAY = {
+    "confirmed": ("CONFIRMED", "bold red"),
+    "refuted": ("refuted", "dim green"),
+    "potential": ("potential", "yellow"),
+    "unverifiable": ("unverifiable", "dim"),
+    "error": ("verify-error", "magenta"),
+}
+
 
 def _severity_text(severity: Severity) -> Text:
     color = SEVERITY_COLORS.get(severity.value, "white")
     return Text(severity.value.upper(), style=color)
+
+
+def _confirmation_text(status) -> Text:
+    """Render a chain's ConfirmationStatus as a colored badge."""
+    if status is None:
+        return Text("-", style="dim")
+    label, style = CONFIRMATION_DISPLAY.get(status.value, (status.value, "white"))
+    return Text(label, style=style)
 
 
 def print_analysis_result(result: AnalysisResult) -> None:
@@ -44,12 +63,35 @@ def print_analysis_result(result: AnalysisResult) -> None:
     ]
     console.print(Panel("\n".join(summary_lines), title="[bold]Cepheus Analysis Summary[/bold]", border_style="cyan"))
 
+    # Whether any chain carries a confirmation verdict. When present we add a
+    # Confirmation column; when every chain is unproven (offline analysis) we
+    # also print a banner so the reader treats them as hypotheses, not findings.
+    has_confirmation = any(getattr(c, "confirmation", None) is not None for c in result.chains)
+    all_unconfirmed = bool(result.chains) and all(
+        getattr(c, "confirmation", None) is not None and c.confirmation.value in ("potential", "unverifiable")
+        for c in result.chains
+    )
+
     # Escape chains table
     if result.chains:
+        if all_unconfirmed:
+            console.print(
+                Panel(
+                    "These are UNCONFIRMED static matches — hypotheses based on the "
+                    "captured posture, not demonstrated escapes. Re-run with "
+                    "[bold]cepheus scan -c <container>[/bold] (or "
+                    "[bold]analyze -c <container>[/bold]) to live-verify them and "
+                    "surface only what is actually exploitable.",
+                    title="[bold yellow]Unconfirmed — verification not run[/bold yellow]",
+                    border_style="yellow",
+                )
+            )
         table = Table(title="Escape Chains (ranked by score)", show_lines=True)
         table.add_column("#", style="dim", width=4)
         table.add_column("Score", justify="right", width=6)
         table.add_column("Severity", width=10)
+        if has_confirmation:
+            table.add_column("Confirmation", width=13)
         table.add_column("Chain", min_width=40)
         table.add_column("Steps", justify="center", width=6)
         table.add_column("Reliability", justify="right", width=11)
@@ -57,15 +99,22 @@ def print_analysis_result(result: AnalysisResult) -> None:
 
         for i, chain in enumerate(result.chains, 1):
             sev_text = _severity_text(chain.severity)
-            table.add_row(
+            row = [
                 str(i),
                 f"{chain.composite_score:.2f}",
                 sev_text,
-                chain.description,
-                str(len(chain.steps)),
-                f"{chain.reliability_score:.2f}",
-                f"{chain.stealth_score:.2f}",
+            ]
+            if has_confirmation:
+                row.append(_confirmation_text(getattr(chain, "confirmation", None)))
+            row.extend(
+                [
+                    chain.description,
+                    str(len(chain.steps)),
+                    f"{chain.reliability_score:.2f}",
+                    f"{chain.stealth_score:.2f}",
+                ]
             )
+            table.add_row(*row)
 
         console.print(table)
     else:
