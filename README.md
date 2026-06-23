@@ -170,7 +170,7 @@ cepheus ci my-app:${GITHUB_SHA} --baseline baseline.sarif --fail-on-new -f sarif
 A dedicated GitHub Action wraps this for one-line use:
 
 ```yaml
-- uses: Su1ph3r/cepheus-action@v1.1.0
+- uses: Su1ph3r/cepheus-action@v1.1.1
   with:
     image: my-app:${{ github.sha }}
     max-severity: critical
